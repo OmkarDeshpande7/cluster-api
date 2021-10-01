@@ -24,6 +24,7 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	clusterv1alpha3 "sigs.k8s.io/cluster-api/api/v1alpha3"
 	clusterctlv1 "sigs.k8s.io/cluster-api/cmd/clusterctl/api/v1alpha3"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/internal/test"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -67,7 +68,7 @@ func Test_inventoryClient_CheckInventoryCRDs(t *testing.T) {
 			proxy := test.NewFakeProxy()
 			p := newInventoryClient(proxy, fakePollImmediateWaiter)
 			if tt.fields.alreadyHasCRD {
-				//forcing creation of metadata before test
+				// forcing creation of metadata before test
 				g.Expect(p.EnsureCustomResourceDefinitions()).To(Succeed())
 			}
 
@@ -82,7 +83,7 @@ func Test_inventoryClient_CheckInventoryCRDs(t *testing.T) {
 	}
 }
 
-var fooProvider = clusterctlv1.Provider{ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "ns1", ResourceVersion: "1"}}
+var fooProvider = clusterctlv1.Provider{ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "ns1", ResourceVersion: "999"}}
 
 func Test_inventoryClient_List(t *testing.T) {
 	type fields struct {
@@ -131,10 +132,10 @@ func Test_inventoryClient_Create(t *testing.T) {
 	type args struct {
 		m clusterctlv1.Provider
 	}
-	providerV2 := fakeProvider("infra", clusterctlv1.InfrastructureProviderType, "v0.2.0", "", "")
+	providerV2 := fakeProvider("infra", clusterctlv1.InfrastructureProviderType, "v0.2.0", "")
 	// since this test object is used in a Create request, wherein setting ResourceVersion should no be set
 	providerV2.ResourceVersion = ""
-	providerV3 := fakeProvider("infra", clusterctlv1.InfrastructureProviderType, "v0.3.0", "", "")
+	providerV3 := fakeProvider("infra", clusterctlv1.InfrastructureProviderType, "v0.3.0", "")
 
 	tests := []struct {
 		name          string
@@ -277,6 +278,26 @@ func Test_CheckCAPIContract(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "Pass when Cluster API with v1alpha3 contract is installed, but this is explicitly tolerated",
+			fields: fields{
+				proxy: test.NewFakeProxy().WithObjs(&apiextensionsv1.CustomResourceDefinition{
+					ObjectMeta: metav1.ObjectMeta{Name: "clusters.cluster.x-k8s.io"},
+					Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+						Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
+							{
+								Name:    clusterv1alpha3.GroupVersion.Version,
+								Storage: true,
+							},
+						},
+					},
+				}),
+			},
+			args: args{
+				options: []CheckCAPIContractOption{AllowCAPIContract{Contract: clusterv1alpha3.GroupVersion.Version}, AllowCAPIContract{Contract: test.PreviousCAPIContractNotSupported}},
+			},
+			wantErr: false,
+		},
+		{
 			name: "Pass when Cluster API with previous contract is installed, but this is explicitly tolerated",
 			fields: fields{
 				proxy: test.NewFakeProxy().WithObjs(&apiextensionsv1.CustomResourceDefinition{
@@ -295,7 +316,7 @@ func Test_CheckCAPIContract(t *testing.T) {
 				}),
 			},
 			args: args{
-				options: []CheckCAPIContractOption{AllowCAPIContract{Contract: test.PreviousCAPIContractNotSupported}},
+				options: []CheckCAPIContractOption{AllowCAPIContract{Contract: clusterv1alpha3.GroupVersion.Version}, AllowCAPIContract{Contract: test.PreviousCAPIContractNotSupported}},
 			},
 			wantErr: false,
 		},

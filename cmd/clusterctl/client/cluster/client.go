@@ -63,7 +63,7 @@ type Client interface {
 
 	// CertManager returns a CertManagerClient that can be user for
 	// operating the cert-manager components in the cluster.
-	CertManager() (CertManagerClient, error)
+	CertManager() CertManagerClient
 
 	// ProviderComponents returns a ComponentsClient object that can be user for
 	// operating provider components objects in the management cluster (e.g. the CRDs, controllers, RBAC).
@@ -104,6 +104,7 @@ type clusterClient struct {
 	processor               yaml.Processor
 }
 
+// RepositoryClientFactory defines a function that returns a new repository.Client.
 type RepositoryClientFactory func(provider config.Provider, configClient config.Client, options ...repository.Option) (repository.Client, error)
 
 // ensure clusterClient implements Client.
@@ -117,8 +118,8 @@ func (c *clusterClient) Proxy() Proxy {
 	return c.proxy
 }
 
-func (c *clusterClient) CertManager() (CertManagerClient, error) {
-	return newCertManagerClient(c.configClient, c.proxy, c.pollImmediateWaiter)
+func (c *clusterClient) CertManager() CertManagerClient {
+	return newCertManagerClient(c.configClient, c.repositoryClientFactory, c.proxy, c.pollImmediateWaiter)
 }
 
 func (c *clusterClient) ProviderComponents() ComponentsClient {
@@ -138,7 +139,7 @@ func (c *clusterClient) ObjectMover() ObjectMover {
 }
 
 func (c *clusterClient) ProviderUpgrader() ProviderUpgrader {
-	return newProviderUpgrader(c.configClient, c.repositoryClientFactory, c.ProviderInventory(), c.ProviderComponents())
+	return newProviderUpgrader(c.configClient, c.proxy, c.repositoryClientFactory, c.ProviderInventory(), c.ProviderComponents())
 }
 
 func (c *clusterClient) Template() TemplateClient {
@@ -218,6 +219,7 @@ func newClusterClient(kubeconfig Kubeconfig, configClient config.Client, options
 	return client
 }
 
+// Proxy defines a client proxy interface.
 type Proxy interface {
 	// GetConfig returns the rest.Config
 	GetConfig() (*rest.Config, error)
@@ -233,6 +235,12 @@ type Proxy interface {
 
 	// ListResources returns all the Kubernetes objects with the given labels existing the listed namespaces.
 	ListResources(labels map[string]string, namespaces ...string) ([]unstructured.Unstructured, error)
+
+	// GetContexts returns the list of contexts in kubeconfig which begin with prefix.
+	GetContexts(prefix string) ([]string, error)
+
+	// GetResourceNames returns the list of resource names which begin with prefix.
+	GetResourceNames(groupVersion, kind string, options []client.ListOption, prefix string) ([]string, error)
 }
 
 // retryWithExponentialBackoff repeats an operation until it passes or the exponential backoff times out.
@@ -244,7 +252,7 @@ func retryWithExponentialBackoff(opts wait.Backoff, operation func() error) erro
 		i++
 		if err := operation(); err != nil {
 			if i < opts.Steps {
-				log.V(5).Info("Operation failed, retrying with backoff", "Cause", err.Error())
+				log.V(5).Info("Retrying with backoff", "Cause", err.Error())
 				return false, nil
 			}
 			return false, err

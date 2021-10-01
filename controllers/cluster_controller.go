@@ -30,11 +30,10 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controllers/external"
-	expv1 "sigs.k8s.io/cluster-api/exp/api/v1alpha4"
+	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api/feature"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
@@ -60,7 +59,7 @@ const (
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;patch
 // +kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io;bootstrap.cluster.x-k8s.io;controlplane.cluster.x-k8s.io,resources=*,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;clusters/status,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;clusters/status;clusters/finalizers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch
 
 // ClusterReconciler reconciles a Cluster object.
@@ -68,7 +67,6 @@ type ClusterReconciler struct {
 	Client           client.Client
 	WatchFilterValue string
 
-	restConfig      *rest.Config
 	recorder        record.EventRecorder
 	externalTracker external.ObjectTracker
 }
@@ -89,7 +87,6 @@ func (r *ClusterReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manag
 	}
 
 	r.recorder = mgr.GetEventRecorderFor("cluster-controller")
-	r.restConfig = mgr.GetConfig()
 	r.externalTracker = external.ObjectTracker{
 		Controller: controller,
 	}
@@ -178,6 +175,16 @@ func patchCluster(ctx context.Context, patchHelper *patch.Helper, cluster *clust
 
 // reconcile handles cluster reconciliation.
 func (r *ClusterReconciler) reconcile(ctx context.Context, cluster *clusterv1.Cluster) (ctrl.Result, error) {
+	log := ctrl.LoggerFrom(ctx, "cluster", cluster.Name)
+
+	if cluster.Spec.Topology != nil {
+		if cluster.Spec.ControlPlaneRef == nil || cluster.Spec.InfrastructureRef == nil {
+			// TODO: add a condition to surface this scenario
+			log.Info("Waiting for the topology to be generated")
+			return ctrl.Result{}, nil
+		}
+	}
+
 	phases := []func(context.Context, *clusterv1.Cluster) (ctrl.Result, error){
 		r.reconcileInfrastructure,
 		r.reconcileControlPlane,
@@ -422,7 +429,7 @@ func (c clusterDescendants) filterOwnedDescendants(cluster *clusterv1.Cluster) (
 		obj := o.(client.Object)
 		acc, err := meta.Accessor(obj)
 		if err != nil {
-			return nil
+			return nil // nolint:nilerr // We don't want to exit the EachListItem loop, just continue
 		}
 
 		if util.IsOwnedByObject(acc, cluster) {

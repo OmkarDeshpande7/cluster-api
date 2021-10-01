@@ -28,10 +28,10 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apiserver/pkg/storage/names"
 	"k8s.io/klog/v2/klogr"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
-	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controllers/external"
-	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha4"
+	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util/collections"
 	"sigs.k8s.io/cluster-api/util/failuredomains"
 	"sigs.k8s.io/cluster-api/util/patch"
@@ -107,9 +107,9 @@ func (c *ControlPlane) Version() *string {
 	return &c.KCP.Spec.Version
 }
 
-// InfrastructureTemplate returns the KubeadmControlPlane's infrastructure template.
-func (c *ControlPlane) InfrastructureTemplate() *corev1.ObjectReference {
-	return &c.KCP.Spec.InfrastructureTemplate
+// MachineInfrastructureTemplateRef returns the KubeadmControlPlane's infrastructure template for Machines.
+func (c *ControlPlane) MachineInfrastructureTemplateRef() *corev1.ObjectReference {
+	return &c.KCP.Spec.MachineTemplate.InfrastructureRef
 }
 
 // AsOwnerReference returns an owner reference to the KubeadmControlPlane.
@@ -205,7 +205,8 @@ func (c *ControlPlane) GenerateKubeadmConfig(spec *bootstrapv1.KubeadmConfigSpec
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            names.SimpleNameGenerator.GenerateName(c.KCP.Name + "-"),
 			Namespace:       c.KCP.Namespace,
-			Labels:          ControlPlaneLabelsForCluster(c.Cluster.Name),
+			Labels:          ControlPlaneMachineLabelsForCluster(c.KCP, c.Cluster.Name),
+			Annotations:     c.KCP.Spec.MachineTemplate.ObjectMeta.Annotations,
 			OwnerReferences: []metav1.OwnerReference{owner},
 		},
 		Spec: *spec,
@@ -217,9 +218,10 @@ func (c *ControlPlane) GenerateKubeadmConfig(spec *bootstrapv1.KubeadmConfigSpec
 func (c *ControlPlane) NewMachine(infraRef, bootstrapRef *corev1.ObjectReference, failureDomain *string) *clusterv1.Machine {
 	return &clusterv1.Machine{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      names.SimpleNameGenerator.GenerateName(c.KCP.Name + "-"),
-			Namespace: c.KCP.Namespace,
-			Labels:    ControlPlaneLabelsForCluster(c.Cluster.Name),
+			Name:        names.SimpleNameGenerator.GenerateName(c.KCP.Name + "-"),
+			Namespace:   c.KCP.Namespace,
+			Labels:      ControlPlaneMachineLabelsForCluster(c.KCP, c.Cluster.Name),
+			Annotations: c.KCP.Spec.MachineTemplate.ObjectMeta.Annotations,
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(c.KCP, controlplanev1.GroupVersion.WithKind("KubeadmControlPlane")),
 			},
@@ -261,14 +263,19 @@ func (c *ControlPlane) MachinesNeedingRollout() collections.Machines {
 		// Machines that are scheduled for rollout (KCP.Spec.RolloutAfter set, the RolloutAfter deadline is expired, and the machine was created before the deadline).
 		collections.ShouldRolloutAfter(&c.reconciliationTime, c.KCP.Spec.RolloutAfter),
 		// Machines that do not match with KCP config.
-		collections.Not(MatchesKCPConfiguration(c.infraResources, c.kubeadmConfigs, c.KCP)),
+		collections.Not(MatchesMachineSpec(c.infraResources, c.kubeadmConfigs, c.KCP)),
 	)
 }
 
 // UpToDateMachines returns the machines that are up to date with the control
 // plane's configuration and therefore do not require rollout.
 func (c *ControlPlane) UpToDateMachines() collections.Machines {
-	return c.Machines.Difference(c.MachinesNeedingRollout())
+	return c.Machines.Filter(
+		// Machines that shouldn't be rolled out after the deadline has expired.
+		collections.Not(collections.ShouldRolloutAfter(&c.reconciliationTime, c.KCP.Spec.RolloutAfter)),
+		// Machines that match with KCP config.
+		MatchesMachineSpec(c.infraResources, c.kubeadmConfigs, c.KCP),
+	)
 }
 
 // getInfraResources fetches the external infrastructure resource for each machine in the collection and returns a map of machine.Name -> infraResource.
@@ -327,6 +334,7 @@ func (c *ControlPlane) HasUnhealthyMachine() bool {
 	return len(c.UnhealthyMachines()) > 0
 }
 
+// PatchMachines patches all the machines conditions.
 func (c *ControlPlane) PatchMachines(ctx context.Context) error {
 	errList := []error{}
 	for i := range c.Machines {

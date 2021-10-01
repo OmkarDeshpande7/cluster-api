@@ -124,8 +124,8 @@ type KubeadmConfigStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=kubeadmconfigs,scope=Namespaced,categories=cluster-api
-// +kubebuilder:storageversion
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Time duration since creation of KubeadmConfig"
 
 // KubeadmConfig is the Schema for the kubeadmconfigs API.
 type KubeadmConfig struct {
@@ -136,10 +136,12 @@ type KubeadmConfig struct {
 	Status KubeadmConfigStatus `json:"status,omitempty"`
 }
 
+// GetConditions returns the set of conditions for this object.
 func (c *KubeadmConfig) GetConditions() clusterv1.Conditions {
 	return c.Status.Conditions
 }
 
+// SetConditions sets the conditions on this object.
 func (c *KubeadmConfig) SetConditions(conditions clusterv1.Conditions) {
 	c.Status.Conditions = conditions
 }
@@ -204,7 +206,7 @@ type FileSource struct {
 	Secret SecretFileSource `json:"secret"`
 }
 
-// Adapts a Secret into a FileSource.
+// SecretFileSource adapts a Secret into a FileSource.
 //
 // The contents of the target Secret's Data field will be presented
 // as files using the keys in the Data field as the file names.

@@ -21,15 +21,12 @@ import (
 	"time"
 
 	. "github.com/onsi/gomega"
-
 	corev1 "k8s.io/api/core/v1"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/client-go/kubernetes/scheme"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
-	"sigs.k8s.io/cluster-api/controllers/external"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	capierrors "sigs.k8s.io/cluster-api/errors"
+	"sigs.k8s.io/cluster-api/internal/builder"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -51,8 +48,8 @@ func TestClusterReconcilePhases(t *testing.T) {
 					Port: 8443,
 				},
 				InfrastructureRef: &corev1.ObjectReference{
-					APIVersion: "infrastructure.cluster.x-k8s.io/v1alpha4",
-					Kind:       "InfrastructureMachine",
+					APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+					Kind:       "GenericInfrastructureMachine",
 					Name:       "test",
 				},
 			},
@@ -80,8 +77,8 @@ func TestClusterReconcilePhases(t *testing.T) {
 				name:    "returns no error if infra config is marked for deletion",
 				cluster: cluster,
 				infraRef: map[string]interface{}{
-					"kind":       "InfrastructureMachine",
-					"apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha4",
+					"kind":       "GenericInfrastructureMachine",
+					"apiVersion": "infrastructure.cluster.x-k8s.io/v1beta1",
 					"metadata": map[string]interface{}{
 						"name":              "test",
 						"namespace":         "test-namespace",
@@ -94,8 +91,8 @@ func TestClusterReconcilePhases(t *testing.T) {
 				name:    "returns no error if infrastructure is marked ready on cluster",
 				cluster: cluster,
 				infraRef: map[string]interface{}{
-					"kind":       "InfrastructureMachine",
-					"apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha4",
+					"kind":       "GenericInfrastructureMachine",
+					"apiVersion": "infrastructure.cluster.x-k8s.io/v1beta1",
 					"metadata": map[string]interface{}{
 						"name":              "test",
 						"namespace":         "test-namespace",
@@ -108,8 +105,8 @@ func TestClusterReconcilePhases(t *testing.T) {
 				name:    "returns error if infrastructure has the paused annotation",
 				cluster: cluster,
 				infraRef: map[string]interface{}{
-					"kind":       "InfrastructureMachine",
-					"apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha4",
+					"kind":       "GenericInfrastructureMachine",
+					"apiVersion": "infrastructure.cluster.x-k8s.io/v1beta1",
 					"metadata": map[string]interface{}{
 						"name":      "test",
 						"namespace": "test-namespace",
@@ -125,18 +122,16 @@ func TestClusterReconcilePhases(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				g := NewWithT(t)
-				g.Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())
-				g.Expect(apiextensionsv1.AddToScheme(scheme.Scheme)).To(Succeed())
 
 				var c client.Client
 				if tt.infraRef != nil {
 					infraConfig := &unstructured.Unstructured{Object: tt.infraRef}
 					c = fake.NewClientBuilder().
-						WithObjects(external.TestGenericInfrastructureCRD.DeepCopy(), tt.cluster, infraConfig).
+						WithObjects(builder.GenericInfrastructureMachineCRD.DeepCopy(), tt.cluster, infraConfig).
 						Build()
 				} else {
 					c = fake.NewClientBuilder().
-						WithObjects(external.TestGenericInfrastructureCRD.DeepCopy(), tt.cluster).
+						WithObjects(builder.GenericInfrastructureMachineCRD.DeepCopy(), tt.cluster).
 						Build()
 				}
 				r := &ClusterReconciler{
@@ -209,15 +204,12 @@ func TestClusterReconcilePhases(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				g := NewWithT(t)
-				g.Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())
 
 				c := fake.NewClientBuilder().
-					WithScheme(scheme.Scheme).
 					WithObjects(tt.cluster).
 					Build()
 				if tt.secret != nil {
 					c = fake.NewClientBuilder().
-						WithScheme(scheme.Scheme).
 						WithObjects(tt.cluster, tt.secret).
 						Build()
 				}
@@ -366,10 +358,7 @@ func TestClusterReconciler_reconcilePhase(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
 
-			g.Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())
-
 			c := fake.NewClientBuilder().
-				WithScheme(scheme.Scheme).
 				WithObjects(tt.cluster).
 				Build()
 

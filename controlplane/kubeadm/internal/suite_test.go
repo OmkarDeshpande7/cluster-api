@@ -17,34 +17,21 @@ limitations under the License.
 package internal
 
 import (
-	"fmt"
 	"os"
 	"testing"
 
-	"sigs.k8s.io/cluster-api/test/helpers"
+	"sigs.k8s.io/cluster-api/internal/envtest"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 var (
-	testEnv *helpers.TestEnvironment
-	ctx     = ctrl.SetupSignalHandler()
+	env *envtest.Environment
+	ctx = ctrl.SetupSignalHandler()
 )
 
 func TestMain(m *testing.M) {
-	testEnv = helpers.NewTestEnvironment()
-	go func() {
-		if err := testEnv.StartManager(ctx); err != nil {
-			panic(fmt.Sprintf("Failed to start the envtest manager: %v", err))
-		}
-	}()
-	<-testEnv.Manager.Elected()
-	testEnv.WaitForWebhooks()
-
-	code := m.Run()
-
-	if err := testEnv.Stop(); err != nil {
-		panic(fmt.Sprintf("Failed to stop envtest: %v", err))
-	}
-
-	os.Exit(code)
+	os.Exit(envtest.Run(ctx, envtest.RunInput{
+		M:        m,
+		SetupEnv: func(e *envtest.Environment) { env = e },
+	}))
 }

@@ -28,17 +28,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cabpkv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha3"
-	kubeadmv1beta1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/types/v1beta1"
+	"sigs.k8s.io/cluster-api/bootstrap/kubeadm/types/upstreamv1beta1"
 	"sigs.k8s.io/cluster-api/util"
 )
 
 func TestKubeadmControlPlaneConversion(t *testing.T) {
 	g := NewWithT(t)
-	ns, err := testEnv.CreateNamespace(ctx, fmt.Sprintf("conversion-webhook-%s", util.RandomString(5)))
+
+	ns, err := env.CreateNamespace(ctx, fmt.Sprintf("conversion-webhook-%s", util.RandomString(5)))
 	g.Expect(err).ToNot(HaveOccurred())
 	infraMachineTemplateName := fmt.Sprintf("test-machinetemplate-%s", util.RandomString(5))
 	controlPlaneName := fmt.Sprintf("test-controlpane-%s", util.RandomString(5))
-	controlPane := &KubeadmControlPlane{
+	controlPlane := &KubeadmControlPlane{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      controlPlaneName,
 			Namespace: ns.Name,
@@ -53,13 +54,13 @@ func TestKubeadmControlPlaneConversion(t *testing.T) {
 				Name:       infraMachineTemplateName,
 			},
 			KubeadmConfigSpec: cabpkv1.KubeadmConfigSpec{
-				ClusterConfiguration: &kubeadmv1beta1.ClusterConfiguration{
-					APIServer: kubeadmv1beta1.APIServer{
-						ControlPlaneComponent: kubeadmv1beta1.ControlPlaneComponent{
+				ClusterConfiguration: &upstreamv1beta1.ClusterConfiguration{
+					APIServer: upstreamv1beta1.APIServer{
+						ControlPlaneComponent: upstreamv1beta1.ControlPlaneComponent{
 							ExtraArgs: map[string]string{
 								"foo": "bar",
 							},
-							ExtraVolumes: []kubeadmv1beta1.HostPathMount{
+							ExtraVolumes: []upstreamv1beta1.HostPathMount{
 								{
 									Name:      "mount-path",
 									HostPath:  "/foo",
@@ -70,14 +71,14 @@ func TestKubeadmControlPlaneConversion(t *testing.T) {
 						},
 					},
 				},
-				InitConfiguration: &kubeadmv1beta1.InitConfiguration{
-					NodeRegistration: kubeadmv1beta1.NodeRegistrationOptions{
+				InitConfiguration: &upstreamv1beta1.InitConfiguration{
+					NodeRegistration: upstreamv1beta1.NodeRegistrationOptions{
 						Name:      "foo",
 						CRISocket: "/var/run/containerd/containerd.sock",
 					},
 				},
-				JoinConfiguration: &kubeadmv1beta1.JoinConfiguration{
-					NodeRegistration: kubeadmv1beta1.NodeRegistrationOptions{
+				JoinConfiguration: &upstreamv1beta1.JoinConfiguration{
+					NodeRegistration: upstreamv1beta1.NodeRegistrationOptions{
 						Name:      "foo",
 						CRISocket: "/var/run/containerd/containerd.sock",
 					},
@@ -86,8 +87,8 @@ func TestKubeadmControlPlaneConversion(t *testing.T) {
 		},
 	}
 
-	g.Expect(testEnv.Create(ctx, controlPane)).To(Succeed())
+	g.Expect(env.Create(ctx, controlPlane)).To(Succeed())
 	defer func(do ...client.Object) {
-		g.Expect(testEnv.Cleanup(ctx, do...)).To(Succeed())
-	}(ns, controlPane)
+		g.Expect(env.Cleanup(ctx, do...)).To(Succeed())
+	}(ns, controlPlane)
 }

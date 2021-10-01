@@ -22,14 +22,12 @@ import (
 	"time"
 
 	. "github.com/onsi/gomega"
-
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
-
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controllers/remote"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -39,13 +37,13 @@ import (
 func TestReconcileInterruptibleNodeLabel(t *testing.T) {
 	g := NewWithT(t)
 
-	ns, err := testEnv.CreateNamespace(ctx, "test-interruptible-node-label")
+	ns, err := env.CreateNamespace(ctx, "test-interruptible-node-label")
 	g.Expect(err).ToNot(HaveOccurred())
 
 	infraMachine := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"kind":       "InfrastructureMachine",
-			"apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha4",
+			"kind":       "GenericInfrastructureMachine",
+			"apiVersion": "infrastructure.cluster.x-k8s.io/v1beta1",
 			"metadata": map[string]interface{}{
 				"name":      "infra-config1",
 				"namespace": ns.Name,
@@ -77,14 +75,14 @@ func TestReconcileInterruptibleNodeLabel(t *testing.T) {
 		Spec: clusterv1.MachineSpec{
 			ClusterName: cluster.Name,
 			InfrastructureRef: corev1.ObjectReference{
-				APIVersion: "infrastructure.cluster.x-k8s.io/v1alpha4",
-				Kind:       "InfrastructureMachine",
+				APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+				Kind:       "GenericInfrastructureMachine",
 				Name:       "infra-config1",
 				Namespace:  ns.Name,
 			},
 			Bootstrap: clusterv1.Bootstrap{
 				ConfigRef: &corev1.ObjectReference{
-					APIVersion: "bootstrap.cluster.x-k8s.io/v1alpha4",
+					APIVersion: "bootstrap.cluster.x-k8s.io/v1beta1",
 					Kind:       "BootstrapMachine",
 					Name:       "bootstrap-config1",
 				},
@@ -97,24 +95,26 @@ func TestReconcileInterruptibleNodeLabel(t *testing.T) {
 		},
 	}
 
-	g.Expect(testEnv.Create(ctx, cluster)).To(Succeed())
-	g.Expect(testEnv.Create(ctx, node)).To(Succeed())
-	g.Expect(testEnv.Create(ctx, infraMachine)).To(Succeed())
-	g.Expect(testEnv.Create(ctx, machine)).To(Succeed())
+	g.Expect(env.Create(ctx, cluster)).To(Succeed())
+	g.Expect(env.Create(ctx, node)).To(Succeed())
+	g.Expect(env.Create(ctx, infraMachine)).To(Succeed())
+	// Note: We have to DeepCopy the machine, because the Create call clears the status and
+	// reconcileInterruptibleNodeLabel requires .status.nodeRef to be set.
+	g.Expect(env.Create(ctx, machine.DeepCopy())).To(Succeed())
 
 	// Patch infra machine status
-	patchHelper, err := patch.NewHelper(infraMachine, testEnv)
+	patchHelper, err := patch.NewHelper(infraMachine, env)
 	g.Expect(err).ShouldNot(HaveOccurred())
 	g.Expect(unstructured.SetNestedField(infraMachine.Object, true, "status", "interruptible")).To(Succeed())
 	g.Expect(patchHelper.Patch(ctx, infraMachine, patch.WithStatusObservedGeneration{})).To(Succeed())
 
 	defer func(do ...client.Object) {
-		g.Expect(testEnv.Cleanup(ctx, do...)).To(Succeed())
-	}(cluster, node, infraMachine, machine)
+		g.Expect(env.Cleanup(ctx, do...)).To(Succeed())
+	}(cluster, ns, node, infraMachine, machine)
 
 	r := &MachineReconciler{
-		Client:   testEnv.Client,
-		Tracker:  remote.NewTestClusterCacheTracker(log.NullLogger{}, testEnv.Client, scheme.Scheme, client.ObjectKey{Name: cluster.Name, Namespace: cluster.Namespace}),
+		Client:   env.Client,
+		Tracker:  remote.NewTestClusterCacheTracker(log.NullLogger{}, env.Client, scheme.Scheme, client.ObjectKey{Name: cluster.Name, Namespace: cluster.Namespace}),
 		recorder: record.NewFakeRecorder(32),
 	}
 
@@ -124,7 +124,7 @@ func TestReconcileInterruptibleNodeLabel(t *testing.T) {
 	// Check if node gets interruptible label
 	g.Eventually(func() bool {
 		updatedNode := &corev1.Node{}
-		err := testEnv.Get(ctx, client.ObjectKey{Name: node.Name}, updatedNode)
+		err := env.Get(ctx, client.ObjectKey{Name: node.Name}, updatedNode)
 		if err != nil {
 			return false
 		}

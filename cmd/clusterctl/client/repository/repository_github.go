@@ -25,6 +25,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+
 	"github.com/google/go-github/v33/github"
 	"github.com/pkg/errors"
 	"golang.org/x/oauth2"
@@ -171,7 +173,7 @@ func newGitHubRepository(providerConfig config.Provider, configVariablesClient c
 	}
 
 	if defaultVersion == githubLatestReleaseLabel {
-		repo.defaultVersion, err = repo.getLatestRelease()
+		repo.defaultVersion, err = latestContractRelease(repo, clusterv1.GroupVersion.Version)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to get GitHub latest version")
 		}
@@ -238,55 +240,6 @@ func (g *gitHubRepository) getVersions() ([]string, error) {
 	return versions, nil
 }
 
-// getLatestRelease returns the latest release for a github repository, according to
-// semantic version order of the release tag name.
-func (g *gitHubRepository) getLatestRelease() (string, error) {
-	versions, err := g.getVersions()
-	if err != nil {
-		return "", g.handleGithubErr(err, "failed to get the list of versions")
-	}
-
-	// Search for the latest release according to semantic version ordering.
-	// Releases with tag name that are not in semver format are ignored.
-	var latestTag string
-	var latestPrereleaseTag string
-
-	var latestReleaseVersion *version.Version
-	var latestPrereleaseVersion *version.Version
-
-	for _, v := range versions {
-		sv, err := version.ParseSemantic(v)
-		if err != nil {
-			// discard releases with tags that are not a valid semantic versions (the user can point explicitly to such releases)
-			continue
-		}
-
-		// track prereleases separately
-		if sv.PreRelease() != "" {
-			if latestPrereleaseVersion == nil || latestPrereleaseVersion.LessThan(sv) {
-				latestPrereleaseTag = v
-				latestPrereleaseVersion = sv
-			}
-			continue
-		}
-
-		if latestReleaseVersion == nil || latestReleaseVersion.LessThan(sv) {
-			latestTag = v
-			latestReleaseVersion = sv
-		}
-	}
-
-	// Fall back to returning latest prereleases if no release has been cut or bail if it's also empty
-	if latestTag == "" {
-		if latestPrereleaseTag == "" {
-			return "", errors.New("failed to find releases tagged with a valid semantic version number")
-		}
-
-		return latestPrereleaseTag, nil
-	}
-	return latestTag, nil
-}
-
 // getReleaseByTag returns the github repository release with a specific tag name.
 func (g *gitHubRepository) getReleaseByTag(tag string) (*github.RepositoryRelease, error) {
 	cacheID := fmt.Sprintf("%s/%s:%s", g.owner, g.repository, tag)
@@ -336,7 +289,7 @@ func (g *gitHubRepository) downloadFilesFromRelease(release *github.RepositoryRe
 		return nil, g.handleGithubErr(err, "failed to download file %q from %q release", *release.TagName, fileName)
 	}
 	if redirect != "" {
-		response, err := http.Get(redirect) //nolint:bodyclose // (NB: The reader is actually closed in a defer)
+		response, err := http.Get(redirect) //nolint:bodyclose,gosec // (NB: The reader is actually closed in a defer)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to download file %q from %q release via redirect location %q", *release.TagName, fileName, redirect)
 		}

@@ -19,7 +19,7 @@ package tree
 import (
 	"context"
 
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controllers/external"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -41,11 +41,7 @@ type DiscoverOptions struct {
 }
 
 func (d DiscoverOptions) toObjectTreeOptions() ObjectTreeOptions {
-	return ObjectTreeOptions{
-		ShowOtherConditions: d.ShowOtherConditions,
-		DisableNoEcho:       d.DisableNoEcho,
-		DisableGrouping:     d.DisableGrouping,
-	}
+	return ObjectTreeOptions(d)
 }
 
 // Discovery returns an object tree representing the status of a Cluster API cluster.

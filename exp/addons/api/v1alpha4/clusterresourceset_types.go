@@ -37,6 +37,7 @@ type ClusterResourceSetSpec struct {
 	// Label selector for Clusters. The Clusters that are
 	// selected by this will be the ones affected by this ClusterResourceSet.
 	// It must match the Cluster labels. This field is immutable.
+	// Label selector cannot be empty.
 	ClusterSelector metav1.LabelSelector `json:"clusterSelector"`
 
 	// Resources is a list of Secrets/ConfigMaps where each contains 1 or more resources to be applied to remote clusters.
@@ -53,6 +54,7 @@ type ClusterResourceSetSpec struct {
 // ClusterResourceSetResourceKind is a string representation of a ClusterResourceSet resource kind.
 type ClusterResourceSetResourceKind string
 
+// Define the ClusterResourceSetResourceKind constants.
 const (
 	SecretClusterResourceSetResourceKind    ClusterResourceSetResourceKind = "Secret"
 	ConfigMapClusterResourceSetResourceKind ClusterResourceSetResourceKind = "ConfigMap"
@@ -98,10 +100,12 @@ type ClusterResourceSetStatus struct {
 
 // ANCHOR_END: ClusterResourceSetStatus
 
+// GetConditions returns the set of conditions for this object.
 func (m *ClusterResourceSet) GetConditions() clusterv1.Conditions {
 	return m.Status.Conditions
 }
 
+// SetConditions sets the conditions on this object.
 func (m *ClusterResourceSet) SetConditions(conditions clusterv1.Conditions) {
 	m.Status.Conditions = conditions
 }
@@ -109,7 +113,7 @@ func (m *ClusterResourceSet) SetConditions(conditions clusterv1.Conditions) {
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=clusterresourcesets,scope=Namespaced,categories=cluster-api
 // +kubebuilder:subresource:status
-// +kubebuilder:storageversion
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Time duration since creation of ClusterResourceSet"
 
 // ClusterResourceSet is the Schema for the clusterresourcesets API.
 type ClusterResourceSet struct {

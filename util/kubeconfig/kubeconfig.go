@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package kubeconfig implements utilities for working with kubeconfigs.
 package kubeconfig
 
 import (
@@ -29,7 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/certs"
 	"sigs.k8s.io/cluster-api/util/secret"
@@ -37,6 +38,7 @@ import (
 )
 
 var (
+	// ErrDependentCertificateNotFound signals that a CA secret could not be found.
 	ErrDependentCertificateNotFound = errors.New("could not find secret ca")
 )
 

@@ -55,7 +55,7 @@ Using the config file it is possible to:
   - A list of additional files to be added to the provider repository, to be used e.g.
     to provide `cluster-templates.yaml` files.
 - Define the list of variables to be used when doing `clusterctl init` or
-  `clusterctl config cluster`.
+  `clusterctl generate cluster`.
 - Define a list of intervals to be used in the test specs for defining timeouts for the
   wait and `Eventually` methods.
 - Define the list of images to be loaded in the management cluster (this is specific to
@@ -204,14 +204,14 @@ test specs for the most common Cluster API use cases.
 [deprecated E2E config file]: https://pkg.go.dev/sigs.k8s.io/cluster-api/test/framework?tab=doc#Config
 [deprecated InitManagementCluster method]: https://pkg.go.dev/sigs.k8s.io/cluster-api/test/framework?tab=doc#InitManagementCluster
 [Apply method]: https://pkg.go.dev/sigs.k8s.io/cluster-api/test/framework?tab=doc#Applier
-[CAPA E2E tests]: https://github.com/kubernetes-sigs/cluster-api-provider-aws/blob/master/scripts/ci-e2e.sh
-[CAPG E2E tests]: https://github.com/kubernetes-sigs/cluster-api-provider-gcp/blob/master/scripts/ci-e2e.sh
+[CAPA E2E tests]: https://github.com/kubernetes-sigs/cluster-api-provider-aws/blob/main/scripts/ci-e2e.sh
+[CAPG E2E tests]: https://github.com/kubernetes-sigs/cluster-api-provider-gcp/blob/main/scripts/ci-e2e.sh
 [WaitForClusterToProvision]: https://pkg.go.dev/sigs.k8s.io/cluster-api/test/framework?tab=doc#WaitForClusterToProvision
 [WaitForKubeadmControlPlaneMachinesToExist]: https://pkg.go.dev/sigs.k8s.io/cluster-api/test/framework?tab=doc#WaitForKubeadmControlPlaneMachinesToExist
 [controller-runtime Client]: https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.5.2/pkg/client?tab=doc#Client
 [boskos]: https://git.k8s.io/test-infra/boskos
 [E2E config file]: https://pkg.go.dev/sigs.k8s.io/cluster-api/test/framework/clusterctl?tab=doc#E2EConfig
-[example E2E config file]: https://github.com/kubernetes-sigs/cluster-api/blob/master/test/e2e/config/docker.yaml
+[example E2E config file]: https://github.com/kubernetes-sigs/cluster-api/blob/main/test/e2e/config/docker.yaml
 [NewKindClusterProvider]: https://pkg.go.dev/sigs.k8s.io/cluster-api/test/framework/bootstrap?tab=doc#NewKindClusterProvider
 [InitManagementClusterAndWatchControllerLogs method]: https://pkg.go.dev/sigs.k8s.io/cluster-api/test/framework/clusterctl?tab=doc#InitManagementClusterAndWatchControllerLogs
 [ClusterTemplate method]: https://pkg.go.dev/sigs.k8s.io/cluster-api/test/framework/clusterctl?tab=doc#ConfigCluster

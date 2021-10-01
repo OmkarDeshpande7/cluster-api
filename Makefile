@@ -20,6 +20,12 @@ SHELL:=/usr/bin/env bash
 
 .DEFAULT_GOAL:=help
 
+#
+# Go.
+#
+GO_VERSION ?= 1.16.8
+GO_CONTAINER_IMAGE ?= docker.io/library/golang:$(GO_VERSION)
+
 # Use GOPROXY environment variable if set
 GOPROXY := $(shell go env GOPROXY)
 ifeq ($(GOPROXY),)
@@ -30,27 +36,31 @@ export GOPROXY
 # Active module mode, as we use go modules to manage dependencies
 export GO111MODULE=on
 
-# Default timeout for starting/stopping the Kubebuilder test control plane
-export KUBEBUILDER_CONTROLPLANE_START_TIMEOUT ?=60s
-export KUBEBUILDER_CONTROLPLANE_STOP_TIMEOUT ?=60s
+#
+# Kubebuilder.
+#
+export KUBEBUILDER_ENVTEST_KUBERNETES_VERSION ?= 1.22.0
+export KUBEBUILDER_CONTROLPLANE_START_TIMEOUT ?= 60s
+export KUBEBUILDER_CONTROLPLANE_STOP_TIMEOUT ?= 60s
 
 # This option is for running docker manifest command
 export DOCKER_CLI_EXPERIMENTAL := enabled
 
+#
 # Directories.
+#
 # Full directory of where the Makefile resides
 ROOT_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 EXP_DIR := exp
-TOOLS_DIR := hack/tools
-TOOLS_BIN_DIR := $(TOOLS_DIR)/bin
 BIN_DIR := bin
-E2E_FRAMEWORK_DIR := test/framework
-CAPD_DIR := test/infrastructure/docker
-RELEASE_NOTES_BIN := bin/release-notes
-RELEASE_NOTES := $(TOOLS_DIR)/$(RELEASE_NOTES_BIN)
-GO_APIDIFF_BIN := bin/go-apidiff
+TEST_DIR := test
+TOOLS_DIR := hack/tools
+TOOLS_BIN_DIR := $(TOOLS_DIR)/$(BIN_DIR)
+E2E_FRAMEWORK_DIR := $(TEST_DIR)/framework
+CAPD_DIR := $(TEST_DIR)/infrastructure/docker
+GO_APIDIFF_BIN := $(BIN_DIR)/go-apidiff
 GO_APIDIFF := $(TOOLS_DIR)/$(GO_APIDIFF_BIN)
-ENVSUBST_BIN := bin/envsubst
+ENVSUBST_BIN := $(BIN_DIR)/envsubst
 ENVSUBST := $(TOOLS_DIR)/$(ENVSUBST_BIN)
 
 export PATH := $(abspath $(TOOLS_BIN_DIR)):$(PATH)
@@ -58,15 +68,21 @@ export PATH := $(abspath $(TOOLS_BIN_DIR)):$(PATH)
 # Set --output-base for conversion-gen if we are not within GOPATH
 ifneq ($(abspath $(ROOT_DIR)),$(shell go env GOPATH)/src/sigs.k8s.io/cluster-api)
 	CONVERSION_GEN_OUTPUT_BASE := --output-base=$(ROOT_DIR)
+else
+	export GOPATH := $(shell go env GOPATH)
 endif
 
+#
 # Binaries.
-# Need to use abspath so we can invoke these from subdirectories
+#
+# Note: Need to use abspath so we can invoke these from subdirectories
 KUSTOMIZE := $(abspath $(TOOLS_BIN_DIR)/kustomize)
+SETUP_ENVTEST := $(abspath $(TOOLS_BIN_DIR)/setup-envtest)
 CONTROLLER_GEN := $(abspath $(TOOLS_BIN_DIR)/controller-gen)
 GOTESTSUM := $(abspath $(TOOLS_BIN_DIR)/gotestsum)
 GOLANGCI_LINT := $(abspath $(TOOLS_BIN_DIR)/golangci-lint)
 CONVERSION_GEN := $(abspath $(TOOLS_BIN_DIR)/conversion-gen)
+CONVERSION_VERIFIER := $(abspath $(TOOLS_BIN_DIR)/conversion-verifier)
 ENVSUBST := $(abspath $(TOOLS_BIN_DIR)/envsubst)
 
 # clusterctl.
@@ -120,34 +136,40 @@ help:  ## Display this help
 
 ARTIFACTS ?= ${ROOT_DIR}/_artifacts
 
+KUBEBUILDER_ASSETS ?= $(shell $(SETUP_ENVTEST) use --use-env -p path $(KUBEBUILDER_ENVTEST_KUBERNETES_VERSION))
+
 .PHONY: test
-test: ## Run tests.
-	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; go test ./... $(TEST_ARGS)
+test: $(SETUP_ENVTEST) ## Run tests.
+	KUBEBUILDER_ASSETS="$(KUBEBUILDER_ASSETS)" go test ./... $(TEST_ARGS)
 
 .PHONY: test-verbose
 test-verbose: ## Run tests with verbose settings.
-	TEST_ARGS="$(TEST_ARGS) -v" $(MAKE) test
+	$(MAKE) test TEST_ARGS="$(TEST_ARGS) -v"
 
 .PHONY: test-junit
-test-junit: $(GOTESTSUM) ## Run tests with verbose setting and generate a junit report.
-	source ./scripts/fetch_ext_bins.sh; fetch_tools; setup_envs; set +o errexit; (go test -json ./... $(TEST_ARGS); echo $$? > $(ARTIFACTS)/junit.exitcode) | tee $(ARTIFACTS)/junit.stdout
+test-junit: $(SETUP_ENVTEST) $(GOTESTSUM) ## Run tests with verbose setting and generate a junit report.
+	set +o errexit; (KUBEBUILDER_ASSETS="$(KUBEBUILDER_ASSETS)" go test -json ./... $(TEST_ARGS); echo $$? > $(ARTIFACTS)/junit.exitcode) | tee $(ARTIFACTS)/junit.stdout
 	$(GOTESTSUM) --junitfile $(ARTIFACTS)/junit.xml --raw-command cat $(ARTIFACTS)/junit.stdout
 	exit $$(cat $(ARTIFACTS)/junit.exitcode)
 
 .PHONY: test-cover
 test-cover: ## Run tests with code coverage and code generate reports.
-	TEST_ARGS="$(TEST_ARGS) -coverprofile=out/coverage.out" $(MAKE) test
+	$(MAKE) test TEST_ARGS="$(TEST_ARGS) -coverprofile=out/coverage.out"
 	go tool cover -func=out/coverage.out -o out/coverage.txt
 	go tool cover -html=out/coverage.out -o out/coverage.html
 
 .PHONY: docker-build-e2e
 docker-build-e2e: ## Rebuild all Cluster API provider images to be used in the e2e tests
 	make docker-build REGISTRY=gcr.io/k8s-staging-cluster-api PULL_POLICY=IfNotPresent
-	$(MAKE) -C test/infrastructure/docker docker-build REGISTRY=gcr.io/k8s-staging-cluster-api PULL_POLICY=IfNotPresent
+	$(MAKE) -C $(CAPD_DIR) docker-build REGISTRY=gcr.io/k8s-staging-cluster-api PULL_POLICY=IfNotPresent
 
 .PHONY: test-e2e
 test-e2e: ## Run the e2e tests
-	$(MAKE) -C test/e2e run
+	$(MAKE) -C $(TEST_DIR)/e2e run
+
+.PHONY: kind-cluster
+kind-cluster: ## Create a new kind cluster designed for testing with Tilt
+	hack/kind-install-for-capd.sh
 
 ## --------------------------------------
 ## Binaries
@@ -175,11 +197,11 @@ managers: ## Build all managers
 clusterctl: ## Build clusterctl binary
 	go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/clusterctl sigs.k8s.io/cluster-api/cmd/clusterctl
 
+$(SETUP_ENVTEST): $(TOOLS_DIR)/go.mod # Build setup-envtest from tools folder.
+	cd $(TOOLS_DIR); go build -tags=tools -o $(BIN_DIR)/setup-envtest sigs.k8s.io/controller-runtime/tools/setup-envtest
+
 $(CONTROLLER_GEN): $(TOOLS_DIR)/go.mod # Build controller-gen from tools folder.
 	cd $(TOOLS_DIR); go build -tags=tools -o $(BIN_DIR)/controller-gen sigs.k8s.io/controller-tools/cmd/controller-gen
-
-$(GOLANGCI_LINT): $(TOOLS_DIR)/go.mod # Build golangci-lint from tools folder.
-	cd $(TOOLS_DIR); go build -tags=tools -o $(BIN_DIR)/golangci-lint github.com/golangci/golangci-lint/cmd/golangci-lint
 
 $(GOTESTSUM): $(TOOLS_DIR)/go.mod # Build gotestsum from tools folder.
 	cd $(TOOLS_DIR); go build -tags=tools -o $(BIN_DIR)/gotestsum gotest.tools/gotestsum
@@ -187,8 +209,8 @@ $(GOTESTSUM): $(TOOLS_DIR)/go.mod # Build gotestsum from tools folder.
 $(CONVERSION_GEN): $(TOOLS_DIR)/go.mod
 	cd $(TOOLS_DIR); go build -tags=tools -o $(BIN_DIR)/conversion-gen k8s.io/code-generator/cmd/conversion-gen
 
-$(RELEASE_NOTES): $(TOOLS_DIR)/go.mod
-	cd $(TOOLS_DIR) && go build -tags=tools -o $(RELEASE_NOTES_BIN) ./release
+$(CONVERSION_VERIFIER): $(TOOLS_DIR)/go.mod
+	cd $(TOOLS_DIR); go build -tags=tools -o $(BIN_DIR)/conversion-verifier sigs.k8s.io/cluster-api/hack/tools/conversion-verifier
 
 $(GO_APIDIFF): $(TOOLS_DIR)/go.mod
 	cd $(TOOLS_DIR) && go build -tags=tools -o $(GO_APIDIFF_BIN) github.com/joelanford/go-apidiff
@@ -196,13 +218,20 @@ $(GO_APIDIFF): $(TOOLS_DIR)/go.mod
 $(ENVSUBST): $(TOOLS_DIR)/go.mod
 	cd $(TOOLS_DIR) && go build -tags=tools -o $(ENVSUBST_BIN) github.com/drone/envsubst/v2/cmd/envsubst
 
-$(KUSTOMIZE): # Build kustomize from tools folder.
+$(KUSTOMIZE): # Download kustomize using hack script into tools folder.
 	hack/ensure-kustomize.sh
+
+$(GOLANGCI_LINT): .github/workflows/golangci-lint.yml # Download golanci-lint using hack script into tools folder.
+	hack/ensure-golangci-lint.sh \
+		-b $(TOOLS_DIR)/$(BIN_DIR) \
+		$(shell cat .github/workflows/golangci-lint.yml | grep version | sed 's/.*version: //')
 
 envsubst: $(ENVSUBST) ## Build a local copy of envsubst.
 kustomize: $(KUSTOMIZE) ## Build a local copy of kustomize.
+setup-envtest: $(SETUP_ENVTEST) ## Build a local copy of setup-envtest.
 controller-gen: $(CONTROLLER_GEN) ## Build a local copy of controller-gen.
 conversion-gen: $(CONVERSION_GEN) ## Build a local copy of conversion-gen.
+conversion-verifier: $(CONVERSION_VERIFIER) ## Build a local copy of conversion-verifier.
 gotestsum: $(GOTESTSUM) ## Build a local copy of gotestsum.
 
 .PHONY: e2e-framework
@@ -215,23 +244,15 @@ e2e-framework: ## Builds the CAPI e2e framework
 
 .PHONY: lint
 lint: $(GOLANGCI_LINT) ## Lint codebase
-	$(MAKE) -j8 lint-all
-
-.PHONY: lint-all lint-core lint-e2e lint-capd
-lint-all: lint-core lint-e2e lint-capd
-lint-core:
 	$(GOLANGCI_LINT) run -v $(GOLANGCI_LINT_EXTRA_ARGS)
-lint-e2e:
-	cd $(E2E_FRAMEWORK_DIR); $(GOLANGCI_LINT) run -v $(GOLANGCI_LINT_EXTRA_ARGS)
-lint-capd:
-	cd $(CAPD_DIR); $(GOLANGCI_LINT) run -v $(GOLANGCI_LINT_EXTRA_ARGS)
+	cd $(TEST_DIR); $(GOLANGCI_LINT) run -v $(GOLANGCI_LINT_EXTRA_ARGS)
 
 .PHONY: lint-fix
 lint-fix: $(GOLANGCI_LINT) ## Lint the codebase and run auto-fixers if supported by the linter.
 	GOLANGCI_LINT_EXTRA_ARGS=--fix $(MAKE) lint
 
 apidiff: $(GO_APIDIFF) ## Check for API differences
-	$(GO_APIDIFF) $(shell git rev-parse origin/master) --print-compatible
+	$(GO_APIDIFF) $(shell git rev-parse origin/main) --print-compatible
 
 ## --------------------------------------
 ## Generate / Manifests
@@ -241,12 +262,16 @@ ALL_GENERATE_MODULES = core cabpk kcp
 
 .PHONY: generate
 generate: ## Generate code
-	$(MAKE) generate-manifests generate-go
-	$(MAKE) -C test/infrastructure/docker generate
+	$(MAKE) generate-manifests generate-go generate-go-conversions
+	$(MAKE) -C $(CAPD_DIR) generate
 
 .PHONY: generate-go
 generate-go:  ## Runs Go related generate targets
-	$(MAKE) $(addprefix generate-go-,$(ALL_GENERATE_MODULES)) $(addprefix generate-go-conversions-,$(ALL_GENERATE_MODULES))
+	$(MAKE) $(addprefix generate-go-,$(ALL_GENERATE_MODULES))
+
+.PHONY: generate-go-conversions
+generate-go-conversions: ## Runs Go related generate targets for conversions
+	$(MAKE) $(addprefix generate-go-conversions-,$(ALL_GENERATE_MODULES))
 
 .PHONY: generate-go-core
 generate-go-core: $(CONTROLLER_GEN)
@@ -260,15 +285,20 @@ generate-go-core: $(CONTROLLER_GEN)
 .PHONY: generate-go-conversions-core
 generate-go-conversions-core: $(CONVERSION_GEN)
 	$(MAKE) clean-generated-conversions SRC_DIRS="./api/v1alpha3,./$(EXP_DIR)/api/v1alpha3,./$(EXP_DIR)/addons/api/v1alpha3"
+	$(MAKE) clean-generated-conversions SRC_DIRS="./api/v1alpha4,./$(EXP_DIR)/api/v1alpha4,./$(EXP_DIR)/addons/api/v1alpha4"
 	$(CONVERSION_GEN) \
 		--input-dirs=./api/v1alpha3 \
-		--build-tag=ignore_autogenerated_core_v1alpha3 \
+		--input-dirs=./api/v1alpha4 \
+		--build-tag=ignore_autogenerated_core \
 		--output-file-base=zz_generated.conversion $(CONVERSION_GEN_OUTPUT_BASE) \
 		--go-header-file=./hack/boilerplate/boilerplate.generatego.txt
 	$(CONVERSION_GEN) \
 		--input-dirs=./$(EXP_DIR)/api/v1alpha3 \
+		--input-dirs=./$(EXP_DIR)/api/v1alpha4 \
 		--input-dirs=./$(EXP_DIR)/addons/api/v1alpha3 \
+		--input-dirs=./$(EXP_DIR)/addons/api/v1alpha4 \
 		--extra-peer-dirs=sigs.k8s.io/cluster-api/api/v1alpha3 \
+		--extra-peer-dirs=sigs.k8s.io/cluster-api/api/v1alpha4 \
 		--output-file-base=zz_generated.conversion $(CONVERSION_GEN_OUTPUT_BASE) \
 		--go-header-file=./hack/boilerplate/boilerplate.generatego.txt
 
@@ -284,15 +314,18 @@ generate-go-conversions-cabpk: $(CONVERSION_GEN)
 	$(MAKE) clean-generated-conversions SRC_DIRS="./bootstrap/kubeadm/api"
 	$(CONVERSION_GEN) \
 		--input-dirs=./bootstrap/kubeadm/api/v1alpha3 \
-		--build-tag=ignore_autogenerated_kubeadm_bootstrap_v1alpha3 \
+		--input-dirs=./bootstrap/kubeadm/api/v1alpha4 \
+		--build-tag=ignore_autogenerated_kubeadm_bootstrap \
 		--extra-peer-dirs=sigs.k8s.io/cluster-api/api/v1alpha3 \
+		--extra-peer-dirs=sigs.k8s.io/cluster-api/api/v1alpha4 \
 		--output-file-base=zz_generated.conversion $(CONVERSION_GEN_OUTPUT_BASE) \
 		--go-header-file=./hack/boilerplate/boilerplate.generatego.txt
-	$(MAKE) clean-generated-conversions SRC_DIRS="./bootstrap/kubeadm/types/v1beta1,./bootstrap/kubeadm/types/v1beta2"
+	$(MAKE) clean-generated-conversions SRC_DIRS="./bootstrap/kubeadm/types/upstreamv1beta1,./bootstrap/kubeadm/types/upstreamv1beta2,./bootstrap/kubeadm/types/upstreamv1beta3"
 	$(CONVERSION_GEN) \
-		--input-dirs=./bootstrap/kubeadm/types/v1beta1 \
-		--input-dirs=./bootstrap/kubeadm/types/v1beta2 \
-		--build-tag=ignore_autogenerated_kubeadm_bootstrap_v1alpha3 \
+		--input-dirs=./bootstrap/kubeadm/types/upstreamv1beta1 \
+		--input-dirs=./bootstrap/kubeadm/types/upstreamv1beta2 \
+		--input-dirs=./bootstrap/kubeadm/types/upstreamv1beta3 \
+		--build-tag=ignore_autogenerated_kubeadm_types \
 		--output-file-base=zz_generated.conversion $(CONVERSION_GEN_OUTPUT_BASE) \
 		--go-header-file=./hack/boilerplate/boilerplate.generatego.txt
 
@@ -307,8 +340,12 @@ generate-go-conversions-kcp: $(CONVERSION_GEN)
 	$(MAKE) clean-generated-conversions SRC_DIRS="./controlplane/kubeadm/api"
 	$(CONVERSION_GEN) \
 		--input-dirs=./controlplane/kubeadm/api/v1alpha3 \
-		--build-tag=ignore_autogenerated_kubeadm_controlplane_v1alpha3 \
-		--extra-peer-dirs=sigs.k8s.io/cluster-api/api/v1alpha3,sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha3 \
+		--input-dirs=./controlplane/kubeadm/api/v1alpha4 \
+		--build-tag=ignore_autogenerated_kubeadm_controlplane \
+		--extra-peer-dirs=sigs.k8s.io/cluster-api/api/v1alpha3 \
+		--extra-peer-dirs=sigs.k8s.io/cluster-api/api/v1alpha4 \
+		--extra-peer-dirs=sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha3 \
+		--extra-peer-dirs=sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha4 \
 		--output-file-base=zz_generated.conversion $(CONVERSION_GEN_OUTPUT_BASE) \
 		--go-header-file=./hack/boilerplate/boilerplate.generatego.txt
 
@@ -368,7 +405,7 @@ generate-manifests-kcp: $(CONTROLLER_GEN)
 modules: ## Runs go mod to ensure modules are up to date.
 	go mod tidy
 	cd $(TOOLS_DIR); go mod tidy
-	$(MAKE) -C $(CAPD_DIR) modules
+	cd $(TEST_DIR); go mod tidy
 
 ## --------------------------------------
 ## Docker
@@ -377,7 +414,7 @@ modules: ## Runs go mod to ensure modules are up to date.
 .PHONY: docker-pull-prerequisites
 docker-pull-prerequisites:
 	docker pull docker.io/docker/dockerfile:1.1-experimental
-	docker pull docker.io/library/golang:1.16.2
+	docker pull $(GO_CONTAINER_IMAGE)
 	docker pull gcr.io/distroless/static:latest
 
 .PHONY: docker-build
@@ -388,19 +425,19 @@ docker-build: docker-pull-prerequisites ## Build the docker images for controlle
 
 .PHONY: docker-build-core
 docker-build-core: ## Build the docker image for core controller manager
-	DOCKER_BUILDKIT=1 docker build --build-arg goproxy=$(GOPROXY) --build-arg ARCH=$(ARCH) --build-arg ldflags="$(LDFLAGS)" . -t $(CONTROLLER_IMG)-$(ARCH):$(TAG)
+	DOCKER_BUILDKIT=1 docker build --build-arg builder_image=$(GO_CONTAINER_IMAGE) --build-arg goproxy=$(GOPROXY) --build-arg ARCH=$(ARCH) --build-arg ldflags="$(LDFLAGS)" . -t $(CONTROLLER_IMG)-$(ARCH):$(TAG)
 	$(MAKE) set-manifest-image MANIFEST_IMG=$(CONTROLLER_IMG)-$(ARCH) MANIFEST_TAG=$(TAG) TARGET_RESOURCE="./config/default/manager_image_patch.yaml"
 	$(MAKE) set-manifest-pull-policy TARGET_RESOURCE="./config/default/manager_pull_policy.yaml"
 
 .PHONY: docker-build-kubeadm-bootstrap
 docker-build-kubeadm-bootstrap: ## Build the docker image for kubeadm bootstrap controller manager
-	DOCKER_BUILDKIT=1 docker build --build-arg goproxy=$(GOPROXY) --build-arg ARCH=$(ARCH) --build-arg package=./bootstrap/kubeadm --build-arg ldflags="$(LDFLAGS)" . -t $(KUBEADM_BOOTSTRAP_CONTROLLER_IMG)-$(ARCH):$(TAG)
+	DOCKER_BUILDKIT=1 docker build --build-arg builder_image=$(GO_CONTAINER_IMAGE) --build-arg goproxy=$(GOPROXY) --build-arg ARCH=$(ARCH) --build-arg package=./bootstrap/kubeadm --build-arg ldflags="$(LDFLAGS)" . -t $(KUBEADM_BOOTSTRAP_CONTROLLER_IMG)-$(ARCH):$(TAG)
 	$(MAKE) set-manifest-image MANIFEST_IMG=$(KUBEADM_BOOTSTRAP_CONTROLLER_IMG)-$(ARCH) MANIFEST_TAG=$(TAG) TARGET_RESOURCE="./bootstrap/kubeadm/config/default/manager_image_patch.yaml"
 	$(MAKE) set-manifest-pull-policy TARGET_RESOURCE="./bootstrap/kubeadm/config/default/manager_pull_policy.yaml"
 
 .PHONY: docker-build-kubeadm-control-plane
 docker-build-kubeadm-control-plane: ## Build the docker image for kubeadm control plane controller manager
-	DOCKER_BUILDKIT=1 docker build --build-arg goproxy=$(GOPROXY) --build-arg ARCH=$(ARCH) --build-arg package=./controlplane/kubeadm --build-arg ldflags="$(LDFLAGS)" . -t $(KUBEADM_CONTROL_PLANE_CONTROLLER_IMG)-$(ARCH):$(TAG)
+	DOCKER_BUILDKIT=1 docker build --build-arg builder_image=$(GO_CONTAINER_IMAGE) --build-arg goproxy=$(GOPROXY) --build-arg ARCH=$(ARCH) --build-arg package=./controlplane/kubeadm --build-arg ldflags="$(LDFLAGS)" . -t $(KUBEADM_CONTROL_PLANE_CONTROLLER_IMG)-$(ARCH):$(TAG)
 	$(MAKE) set-manifest-image MANIFEST_IMG=$(KUBEADM_CONTROL_PLANE_CONTROLLER_IMG)-$(ARCH) MANIFEST_TAG=$(TAG) TARGET_RESOURCE="./controlplane/kubeadm/config/default/manager_image_patch.yaml"
 	$(MAKE) set-manifest-pull-policy TARGET_RESOURCE="./controlplane/kubeadm/config/default/manager_pull_policy.yaml"
 
@@ -471,13 +508,19 @@ set-manifest-image:
 ## --------------------------------------
 
 ## latest git tag for the commit, e.g., v0.3.10
-RELEASE_TAG := $(shell git describe --abbrev=0 2>/dev/null)
-## set by Prow, ref name of the base branch, e.g., master
+RELEASE_TAG ?= $(shell git describe --abbrev=0 2>/dev/null)
+# the previous release tag, e.g., v0.3.9, excluding pre-release tags
+PREVIOUS_TAG ?= $(shell git tag -l | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+$$" | sort -V | grep -B1 $(RELEASE_TAG) | head -n 1 2>/dev/null)
+## set by Prow, ref name of the base branch, e.g., main
 RELEASE_ALIAS_TAG := $(PULL_BASE_REF)
 RELEASE_DIR := out
+RELEASE_NOTES_DIR := _releasenotes
 
 $(RELEASE_DIR):
 	mkdir -p $(RELEASE_DIR)/
+
+$(RELEASE_NOTES_DIR):
+	mkdir -p $(RELEASE_NOTES_DIR)/
 
 .PHONY: release
 release: clean-release ## Builds and push container images using the latest git tag for the commit.
@@ -529,14 +572,16 @@ release-manifests: $(RELEASE_DIR) $(KUSTOMIZE) ## Builds the manifests to publis
 .PHONY: release-manifests-dev
 release-manifests-dev: ## Builds the development manifests and copies them in the release folder
 	# Release CAPD components and add them to the release dir
-	$(MAKE) -C test/infrastructure/docker/ release
-	cp test/infrastructure/docker/out/infrastructure-components.yaml $(RELEASE_DIR)/infrastructure-components-development.yaml
+	$(MAKE) -C $(CAPD_DIR) release
+	cp $(CAPD_DIR)/out/infrastructure-components.yaml $(RELEASE_DIR)/infrastructure-components-development.yaml
 	# Adds CAPD templates
-	cp test/infrastructure/docker/templates/* $(RELEASE_DIR)/
+	cp $(CAPD_DIR)/templates/* $(RELEASE_DIR)/
 
 release-binaries: ## Builds the binaries to publish with a release
 	RELEASE_BINARY=./cmd/clusterctl GOOS=linux GOARCH=amd64 $(MAKE) release-binary
+	RELEASE_BINARY=./cmd/clusterctl GOOS=linux GOARCH=arm64 $(MAKE) release-binary
 	RELEASE_BINARY=./cmd/clusterctl GOOS=darwin GOARCH=amd64 $(MAKE) release-binary
+	RELEASE_BINARY=./cmd/clusterctl GOOS=darwin GOARCH=arm64 $(MAKE) release-binary
 
 release-binary: $(RELEASE_DIR)
 	docker run \
@@ -546,7 +591,7 @@ release-binary: $(RELEASE_DIR)
 		-e GOARCH=$(GOARCH) \
 		-v "$$(pwd):/workspace$(DOCKER_VOL_OPTS)" \
 		-w /workspace \
-		golang:1.16.2 \
+		golang:$(GO_VERSION) \
 		go build -a -ldflags "$(LDFLAGS) -extldflags '-static'" \
 		-o $(RELEASE_DIR)/$(notdir $(RELEASE_BINARY))-$(GOOS)-$(GOARCH) $(RELEASE_BINARY)
 
@@ -555,7 +600,7 @@ release-staging: ## Builds and push container images to the staging bucket.
 	REGISTRY=$(STAGING_REGISTRY) $(MAKE) docker-build-all docker-push-all release-alias-tag
 
 .PHONY: release-staging-nightly
-release-staging-nightly: ## Tags and push container images to the staging bucket. Example image tag: cluster-api-controller:nightly_master_20210121
+release-staging-nightly: ## Tags and push container images to the staging bucket. Example image tag: cluster-api-controller:nightly_main_20210121
 	$(eval NEW_RELEASE_ALIAS_TAG := nightly_$(RELEASE_ALIAS_TAG)_$(shell date +'%Y%m%d'))
 	echo $(NEW_RELEASE_ALIAS_TAG)
 	$(MAKE) release-alias-tag TAG=$(RELEASE_ALIAS_TAG) RELEASE_ALIAS_TAG=$(NEW_RELEASE_ALIAS_TAG)
@@ -563,7 +608,7 @@ release-staging-nightly: ## Tags and push container images to the staging bucket
 	$(MAKE) manifest-modification REGISTRY=$(STAGING_REGISTRY) RELEASE_TAG=$(NEW_RELEASE_ALIAS_TAG)
 	## Build the manifests
 	$(MAKE) release-manifests
-	# Example manifest location: artifacts.k8s-staging-cluster-api.appspot.com/components/nightly_master_20210121/bootstrap-components.yaml
+	# Example manifest location: artifacts.k8s-staging-cluster-api.appspot.com/components/nightly_main_20210121/bootstrap-components.yaml
 	gsutil cp $(RELEASE_DIR)/* gs://$(STAGING_BUCKET)/components/$(NEW_RELEASE_ALIAS_TAG)
 
 .PHONY: release-alias-tag
@@ -573,8 +618,8 @@ release-alias-tag: ## Adds the tag to the last build tag.
 	gcloud container images add-tag $(KUBEADM_CONTROL_PLANE_CONTROLLER_IMG):$(TAG) $(KUBEADM_CONTROL_PLANE_CONTROLLER_IMG):$(RELEASE_ALIAS_TAG)
 
 .PHONY: release-notes
-release-notes: $(RELEASE_NOTES)  ## Generates a release notes template to be used with a release.
-	$(RELEASE_NOTES)
+release-notes: $(RELEASE_NOTES_DIR) $(RELEASE_NOTES)
+	go run ./hack/tools/release/notes.go --from=$(PREVIOUS_TAG) > $(RELEASE_NOTES_DIR)/$(RELEASE_TAG).md
 
 ## --------------------------------------
 ## Cleanup / Verification
@@ -602,10 +647,10 @@ clean-release-git: ## Restores the git files usually modified during a release
 clean-book: ## Remove all generated GitBook files
 	rm -rf ./docs/book/_book
 
-.PHONY: clean-manifests ## Reset manifests in config directories back to master
+.PHONY: clean-manifests ## Reset manifests in config directories back to main
 clean-manifests:
-	@read -p "WARNING: This will reset all config directories to local master. Press [ENTER] to continue."
-	git checkout master config bootstrap/kubeadm/config controlplane/kubeadm/config test/infrastructure/docker/config
+	@read -p "WARNING: This will reset all config directories to local main. Press [ENTER] to continue."
+	git checkout main config bootstrap/kubeadm/config controlplane/kubeadm/config $(CAPD_DIR)/config
 
 .PHONY: format-tiltfile
 format-tiltfile: ## Format Tiltfile
@@ -619,6 +664,7 @@ verify:
 	./hack/verify-starlark.sh
 	$(MAKE) verify-modules
 	$(MAKE) verify-gen
+	$(MAKE) verify-conversions
 	$(MAKE) verify-docker-provider
 
 .PHONY: verify-modules
@@ -638,6 +684,10 @@ verify-gen: generate
 		git diff; \
 		echo "generated files are out of date, run make generate"; exit 1; \
 	fi
+
+.PHONY: verify-conversions
+verify-conversions: $(CONVERSION_VERIFIER)
+	$(CONVERSION_VERIFIER)
 
 .PHONY: verify-docker-provider
 verify-docker-provider:

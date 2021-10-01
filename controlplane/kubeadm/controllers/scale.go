@@ -18,15 +18,17 @@ package controllers
 
 import (
 	"context"
-	"sigs.k8s.io/cluster-api/util/collections"
 	"strings"
+
+	"github.com/blang/semver"
+	"sigs.k8s.io/cluster-api/util/collections"
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
-	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controlplane/kubeadm/internal"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/conditions"
@@ -128,7 +130,12 @@ func (r *KubeadmControlPlaneReconciler) scaleDownControlPlane(
 		}
 	}
 
-	if err := workloadCluster.RemoveMachineFromKubeadmConfigMap(ctx, machineToDelete); err != nil {
+	parsedVersion, err := semver.ParseTolerant(kcp.Spec.Version)
+	if err != nil {
+		return ctrl.Result{}, errors.Wrapf(err, "failed to parse kubernetes version %q", kcp.Spec.Version)
+	}
+
+	if err := workloadCluster.RemoveMachineFromKubeadmConfigMap(ctx, machineToDelete, parsedVersion); err != nil {
 		logger.Error(err, "Failed to remove machine from kubeadm ConfigMap")
 		return ctrl.Result{}, err
 	}

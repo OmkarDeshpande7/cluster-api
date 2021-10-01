@@ -6,7 +6,6 @@
 cmd/clusterctl/clusterctl
 bin
 hack/tools/bin
-out
 
 # Test binary, build with `go test -c`
 *.test
@@ -14,6 +13,7 @@ out
 # E2E test templates
 test/e2e/data/infrastructure-docker/v1alpha3/cluster-template*.yaml
 test/e2e/data/infrastructure-docker/v1alpha4/cluster-template*.yaml
+test/e2e/data/infrastructure-docker/v1beta1/cluster-template*.yaml
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
@@ -24,6 +24,7 @@ test/e2e/data/infrastructure-docker/v1alpha4/cluster-template*.yaml
 
 # VSCode
 .vscode/
+*.code-workspace
 
 # kubeconfigs
 minikube.kubeconfig
@@ -67,3 +68,7 @@ clusterctl-settings.json
 
 # test results
 _artifacts
+
+#release artifacts
+out
+_releasenotes

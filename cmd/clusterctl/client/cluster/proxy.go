@@ -36,7 +36,7 @@ import (
 )
 
 var (
-	Scheme = scheme.Scheme
+	localScheme = scheme.Scheme
 )
 
 type proxy struct {
@@ -120,7 +120,7 @@ func (k *proxy) GetConfig() (*rest.Config, error) {
 	}
 	restConfig.UserAgent = fmt.Sprintf("clusterctl/%s (%s)", version.Get().GitVersion, version.Get().Platform)
 
-	// Set QPS and Burst to a threshold that ensures the controller runtime client/client go does't generate throttling log messages
+	// Set QPS and Burst to a threshold that ensures the controller runtime client/client go doesn't generate throttling log messages
 	restConfig.QPS = 20
 	restConfig.Burst = 100
 
@@ -138,7 +138,7 @@ func (k *proxy) NewClient() (client.Client, error) {
 	connectBackoff := newConnectBackoff()
 	if err := retryWithExponentialBackoff(connectBackoff, func() error {
 		var err error
-		c, err = client.New(config, client.Options{Scheme: Scheme})
+		c, err = client.New(config, client.Options{Scheme: localScheme})
 		if err != nil {
 			return err
 		}
@@ -204,6 +204,47 @@ func (k *proxy) ListResources(labels map[string]string, namespaces ...string) ([
 	return ret, nil
 }
 
+// GetContexts returns the list of contexts in kubeconfig which begin with prefix.
+func (k *proxy) GetContexts(prefix string) ([]string, error) {
+	config, err := k.configLoadingRules.Load()
+	if err != nil {
+		return nil, err
+	}
+
+	var comps []string
+	for name := range config.Contexts {
+		if strings.HasPrefix(name, prefix) {
+			comps = append(comps, name)
+		}
+	}
+
+	return comps, nil
+}
+
+// GetResourceNames returns the list of resource names which begin with prefix.
+func (k *proxy) GetResourceNames(groupVersion, kind string, options []client.ListOption, prefix string) ([]string, error) {
+	client, err := k.NewClient()
+	if err != nil {
+		return nil, err
+	}
+
+	objList, err := listObjByGVK(client, groupVersion, kind, options)
+	if err != nil {
+		return nil, err
+	}
+
+	var comps []string
+	for _, item := range objList.Items {
+		name := item.GetName()
+
+		if strings.HasPrefix(name, prefix) {
+			comps = append(comps, name)
+		}
+	}
+
+	return comps, nil
+}
+
 func listObjByGVK(c client.Client, groupVersion, kind string, options []client.ListOption) (*unstructured.UnstructuredList, error) {
 	objList := new(unstructured.UnstructuredList)
 	objList.SetAPIVersion(groupVersion)
@@ -217,14 +258,17 @@ func listObjByGVK(c client.Client, groupVersion, kind string, options []client.L
 	return objList, nil
 }
 
+// ProxyOption defines a function that can change proxy options.
 type ProxyOption func(p *proxy)
 
+// InjectProxyTimeout sets the proxy timeout.
 func InjectProxyTimeout(t time.Duration) ProxyOption {
 	return func(p *proxy) {
 		p.timeout = t
 	}
 }
 
+// InjectKubeconfigPaths sets the kubeconfig paths loading rules.
 func InjectKubeconfigPaths(paths []string) ProxyOption {
 	return func(p *proxy) {
 		p.configLoadingRules.Precedence = paths

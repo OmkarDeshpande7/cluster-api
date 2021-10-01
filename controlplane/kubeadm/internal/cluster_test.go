@@ -24,25 +24,24 @@ import (
 	"crypto/x509/pkix"
 	"fmt"
 	"math/big"
-	"sigs.k8s.io/cluster-api/util/collections"
 	"testing"
 	"time"
 
 	. "github.com/onsi/gomega"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controllers/remote"
 	"sigs.k8s.io/cluster-api/util/certs"
+	"sigs.k8s.io/cluster-api/util/collections"
 	"sigs.k8s.io/cluster-api/util/kubeconfig"
 	"sigs.k8s.io/cluster-api/util/secret"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 func TestGetMachinesForCluster(t *testing.T) {
@@ -53,7 +52,7 @@ func TestGetMachinesForCluster(t *testing.T) {
 	}}
 	cluster := &clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "my-namespace",
+			Namespace: metav1.NamespaceDefault,
 			Name:      "my-cluster",
 		},
 	}
@@ -78,10 +77,10 @@ func TestGetMachinesForCluster(t *testing.T) {
 func TestGetWorkloadCluster(t *testing.T) {
 	g := NewWithT(t)
 
-	ns, err := testEnv.CreateNamespace(ctx, "workload-cluster2")
+	ns, err := env.CreateNamespace(ctx, "workload-cluster2")
 	g.Expect(err).ToNot(HaveOccurred())
 	defer func() {
-		g.Expect(testEnv.Cleanup(ctx, ns)).To(Succeed())
+		g.Expect(env.Cleanup(ctx, ns)).To(Succeed())
 	}()
 
 	// Create an etcd secret with valid certs
@@ -106,8 +105,11 @@ func TestGetWorkloadCluster(t *testing.T) {
 	badCrtEtcdSecret := etcdSecret.DeepCopy()
 	badCrtEtcdSecret.Data[secret.TLSCrtDataName] = []byte("bad cert")
 	tracker, err := remote.NewClusterCacheTracker(
-		log.Log,
-		testEnv.Manager,
+		env.Manager,
+		remote.ClusterCacheTrackerOptions{
+			Log:     log.Log,
+			Indexes: remote.DefaultIndexes,
+		},
 	)
 	g.Expect(err).ToNot(HaveOccurred())
 
@@ -115,7 +117,7 @@ func TestGetWorkloadCluster(t *testing.T) {
 	// Store the envtest config as the contents of the kubeconfig secret.
 	// This way we are using the envtest environment as both the
 	// management and the workload cluster.
-	testEnvKubeconfig := kubeconfig.FromEnvTestConfig(testEnv.GetConfig(), &clusterv1.Cluster{
+	testEnvKubeconfig := kubeconfig.FromEnvTestConfig(env.GetConfig(), &clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-cluster",
 			Namespace: ns.Name,
@@ -184,14 +186,16 @@ func TestGetWorkloadCluster(t *testing.T) {
 			g := NewWithT(t)
 
 			for _, o := range tt.objs {
-				g.Expect(testEnv.CreateObj(ctx, o)).To(Succeed())
+				g.Expect(env.Client.Create(ctx, o)).To(Succeed())
 				defer func(do client.Object) {
-					g.Expect(testEnv.Cleanup(ctx, do)).To(Succeed())
+					g.Expect(env.Cleanup(ctx, do)).To(Succeed())
 				}(o)
 			}
 
+			// Note: The API reader is intentionally used instead of the regular (cached) client
+			// to avoid test failures when the local cache isn't able to catch up in time.
 			m := Management{
-				Client:  testEnv,
+				Client:  env.GetAPIReader(),
 				Tracker: tracker,
 			}
 
@@ -252,7 +256,7 @@ func machineListForTestGetMachinesForCluster() *clusterv1.MachineList {
 			TypeMeta: metav1.TypeMeta{},
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
-				Namespace: "my-namespace",
+				Namespace: metav1.NamespaceDefault,
 				Labels: map[string]string{
 					clusterv1.ClusterLabelName: "my-cluster",
 				},

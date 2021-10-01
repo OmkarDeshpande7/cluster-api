@@ -29,8 +29,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/pointer"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
-	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controlplane/kubeadm/internal"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -42,15 +42,14 @@ const Host string = "nodomain.example.com"
 func TestKubeadmControlPlaneReconciler_RolloutStrategy_ScaleUp(t *testing.T) {
 	g := NewWithT(t)
 
-	cluster, kcp, genericMachineTemplate := createClusterWithControlPlane()
+	cluster, kcp, genericMachineTemplate := createClusterWithControlPlane(metav1.NamespaceDefault)
 	cluster.Spec.ControlPlaneEndpoint.Host = Host
 	cluster.Spec.ControlPlaneEndpoint.Port = 6443
-	//kcp.Spec.Version = Version
 	kcp.Spec.KubeadmConfigSpec.ClusterConfiguration = nil
 	kcp.Spec.Replicas = pointer.Int32Ptr(1)
 	setKCPHealthy(kcp)
 
-	fakeClient := newFakeClient(g, cluster.DeepCopy(), kcp.DeepCopy(), genericMachineTemplate.DeepCopy())
+	fakeClient := newFakeClient(fakeGenericMachineTemplateCRD, cluster.DeepCopy(), kcp.DeepCopy(), genericMachineTemplate.DeepCopy())
 
 	r := &KubeadmControlPlaneReconciler{
 		Client:   fakeClient,
@@ -132,10 +131,9 @@ func TestKubeadmControlPlaneReconciler_RolloutStrategy_ScaleDown(t *testing.T) {
 	version := "v1.17.3"
 	g := NewWithT(t)
 
-	cluster, kcp, tmpl := createClusterWithControlPlane()
+	cluster, kcp, tmpl := createClusterWithControlPlane(metav1.NamespaceDefault)
 	cluster.Spec.ControlPlaneEndpoint.Host = "nodomain.example.com1"
 	cluster.Spec.ControlPlaneEndpoint.Port = 6443
-	//kcp.Spec.Version = Version
 	kcp.Spec.Replicas = pointer.Int32Ptr(3)
 	kcp.Spec.RolloutStrategy.RollingUpdate.MaxSurge.IntVal = 0
 	setKCPHealthy(kcp)
@@ -146,14 +144,14 @@ func TestKubeadmControlPlaneReconciler_RolloutStrategy_ScaleDown(t *testing.T) {
 			Status: internal.ClusterStatus{Nodes: 3},
 		},
 	}
-	objs := []client.Object{cluster.DeepCopy(), kcp.DeepCopy(), tmpl.DeepCopy()}
+	objs := []client.Object{fakeGenericMachineTemplateCRD, cluster.DeepCopy(), kcp.DeepCopy(), tmpl.DeepCopy()}
 	for i := 0; i < 3; i++ {
 		name := fmt.Sprintf("test-%d", i)
 		m := &clusterv1.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: cluster.Namespace,
 				Name:      name,
-				Labels:    internal.ControlPlaneLabelsForCluster(cluster.Name),
+				Labels:    internal.ControlPlaneMachineLabelsForCluster(kcp, cluster.Name),
 			},
 			Spec: clusterv1.MachineSpec{
 				Bootstrap: clusterv1.Bootstrap{
@@ -175,7 +173,7 @@ func TestKubeadmControlPlaneReconciler_RolloutStrategy_ScaleDown(t *testing.T) {
 		objs = append(objs, m, cfg)
 		fmc.Machines.Insert(m)
 	}
-	fakeClient := newFakeClient(g, objs...)
+	fakeClient := newFakeClient(objs...)
 	fmc.Reader = fakeClient
 	r := &KubeadmControlPlaneReconciler{
 		Client:                    fakeClient,
@@ -220,7 +218,7 @@ func machine(name string, opts ...machineOpt) *clusterv1.Machine {
 	m := &clusterv1.Machine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: "default",
+			Namespace: metav1.NamespaceDefault,
 		},
 	}
 	for _, opt := range opts {

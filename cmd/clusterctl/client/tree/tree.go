@@ -25,11 +25,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// ObjectTreeOptions defines the options for an ObjectTree.
 type ObjectTreeOptions struct {
 	// ShowOtherConditions is a list of comma separated kind or kind/name for which we should add   the ShowObjectConditionsAnnotation
 	// to signal to the presentation layer to show all the conditions for the objects.
@@ -52,6 +53,7 @@ type ObjectTree struct {
 	ownership map[types.UID]map[types.UID]bool
 }
 
+// NewObjectTree creates a new object tree with the given root and options.
 func NewObjectTree(root client.Object, options ObjectTreeOptions) *ObjectTree {
 	return &ObjectTree{
 		root:      root,
@@ -155,14 +157,18 @@ func (od ObjectTree) addInner(parent client.Object, obj client.Object) {
 	od.ownership[parent.GetUID()][obj.GetUID()] = true
 }
 
+// GetRoot returns the root of the tree.
 func (od ObjectTree) GetRoot() client.Object { return od.root }
 
+// GetObject returns the object with the given uid.
 func (od ObjectTree) GetObject(id types.UID) client.Object { return od.items[id] }
 
+// IsObjectWithChild determines if an object has dependants.
 func (od ObjectTree) IsObjectWithChild(id types.UID) bool {
 	return len(od.ownership[id]) > 0
 }
 
+// GetObjectsByParent returns all the dependant objects for the given uid.
 func (od ObjectTree) GetObjectsByParent(id types.UID) []client.Object {
 	out := make([]client.Object, 0, len(od.ownership[id]))
 	for k := range od.ownership[id] {

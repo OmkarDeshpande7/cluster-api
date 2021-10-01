@@ -10,7 +10,7 @@ workflow that offers easy deployments and rapid iterative builds.
 1. [Docker](https://docs.docker.com/install/) v19.03 or newer
 1. [kind](https://kind.sigs.k8s.io) v0.9 or newer (other clusters can be
    used if `preload_images_for_kind` is set to false)
-1. [kustomize](https://github.com/kubernetes-sigs/kustomize/blob/master/docs/INSTALL.md)
+1. [kustomize](https://kubectl.docs.kubernetes.io/installation/kustomize/)
    standalone (`kubectl kustomize` does not work because it is missing
    some features of kustomize v3)
 1. [Tilt](https://docs.tilt.dev/install.html) v0.16.0 or newer
@@ -34,11 +34,18 @@ make envsubst
 ## Getting started
 
 ### Create a kind cluster
+A script to create a KIND cluster along with a local docker registry and the correct mounts to run CAPD is included in the hack/ folder.
 
-First, make sure you have a kind cluster and that your `KUBECONFIG` is set up correctly:
+To create a pre-configured cluster run:
 
-``` bash
-kind create cluster
+```bash 
+./hack/kind-install-for-capd.sh
+````
+
+You can see the status of the cluster with:
+
+```bash
+kubectl cluster-info --context kind-capi-test
 ```
 
 ### Create a tilt-settings.json file
@@ -187,7 +194,7 @@ tilt up
 This will open the command-line HUD as well as a web browser interface. You can monitor Tilt's status in either
 location. After a brief amount of time, you should have a running development environment, and you should now be able to
 create a cluster. There are [example worker cluster
-configs](https://github.com/kubernetes-sigs/cluster-api/tree/master/test/infrastructure/docker/examples) available.
+configs](https://github.com/kubernetes-sigs/cluster-api/tree/main/test/infrastructure/docker/examples) available.
 These can be customized for your specific needs.
 
 <aside class="note">
@@ -239,7 +246,7 @@ for the provider and performs a live update of the running container.
 docker build. e.g.
 
 ``` Dockerfile
-RUN wget -qO- https://dl.k8s.io/v1.19.2/kubernetes-client-linux-amd64.tar.gz | tar xvz
+RUN wget -qO- https://dl.k8s.io/v1.21.2/kubernetes-client-linux-amd64.tar.gz | tar xvz
 RUN wget -qO- https://get.docker.com | sh
 ```
 
@@ -256,6 +263,12 @@ COPY --from=tilt-helper /go/kubernetes/client/bin/kubectl /usr/bin/kubectl
 Set to `false` if your provider does not have a ./config folder or you do not want it to be applied in the cluster.
 
 **go_main** (String, default="main.go"): The go main file if not located at the root of the folder
+
+**label** (String, default=provider name): The label to be used to group provider components in the tilt UI 
+in tilt version >= v0.22.2 (see https://blog.tilt.dev/2021/08/09/resource-grouping.html); as a convention,
+provider abbreviation should be used (CAPD, KCP etc.).
+
+**manager_name** (String): If provided, it will allow tilt to move the provider controller under the above label.
 
 ## Customizing Tilt
 

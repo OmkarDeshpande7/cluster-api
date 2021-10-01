@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -157,6 +158,9 @@ type ProviderVersionSource struct {
 	// If a Type=kustomize then Value may be any valid go-getter URL. For
 	// more information please see https://github.com/hashicorp/go-getter#url-format.
 	Value string `json:"value"`
+
+	// Contract defines the Cluster API contract version a specific version of the provider abides to.
+	Contract string `json:"contract,omitempty"`
 
 	// Type describes how to process the source of the component's YAML.
 	//
@@ -481,8 +485,8 @@ func (c *E2EConfig) validateProviders() error {
 	}
 
 	// There should be one InfraProvider (pick your own).
-	if len(providersByType[clusterctlv1.InfrastructureProviderType]) != 1 {
-		return errInvalidArg("invalid config: it is required to have exactly one infrastructure-provider")
+	if len(providersByType[clusterctlv1.InfrastructureProviderType]) < 1 {
+		return errInvalidArg("invalid config: it is required to have at least one infrastructure-provider")
 	}
 	return nil
 }
@@ -495,7 +499,7 @@ func fileExists(filename string) bool {
 	return !info.IsDir()
 }
 
-// InfraProvider returns the infrastructure provider selected for running this E2E test.
+// InfrastructureProviders returns the infrastructure provider selected for running this E2E test.
 func (c *E2EConfig) InfrastructureProviders() []string {
 	InfraProviders := []string{}
 	for _, provider := range c.Providers {
@@ -533,6 +537,15 @@ func (c *E2EConfig) GetIntervals(spec, key string) []interface{} {
 	return intervalsInterfaces
 }
 
+func (c *E2EConfig) HasVariable(varName string) bool {
+	if _, ok := os.LookupEnv(varName); ok {
+		return true
+	}
+
+	_, ok := c.Variables[varName]
+	return ok
+}
+
 // GetVariable returns a variable from environment variables or from the e2e config file.
 func (c *E2EConfig) GetVariable(varName string) string {
 	if value, ok := os.LookupEnv(varName); ok {
@@ -566,4 +579,52 @@ func (c *E2EConfig) GetInt32PtrVariable(varName string) *int32 {
 	wCount, err := strconv.ParseUint(wCountStr, 10, 32)
 	Expect(err).NotTo(HaveOccurred())
 	return pointer.Int32Ptr(int32(wCount))
+}
+
+// GetProviderVersions returns the sorted list of versions defined for a provider.
+func (c *E2EConfig) GetProviderVersions(provider string) []string {
+	return c.getVersions(provider, "*")
+}
+
+func (c *E2EConfig) GetProvidersWithOldestVersion(providers ...string) []string {
+	ret := make([]string, 0, len(providers))
+	for _, p := range providers {
+		versions := c.getVersions(p, "*")
+		if len(versions) > 0 {
+			ret = append(ret, fmt.Sprintf("%s:%s", p, versions[0]))
+		}
+	}
+	return ret
+}
+
+func (c *E2EConfig) GetProviderLatestVersionsByContract(contract string, providers ...string) []string {
+	ret := make([]string, 0, len(providers))
+	for _, p := range providers {
+		versions := c.getVersions(p, contract)
+		if len(versions) > 0 {
+			ret = append(ret, fmt.Sprintf("%s:%s", p, versions[len(versions)-1]))
+		}
+	}
+	return ret
+}
+
+func (c *E2EConfig) getVersions(provider string, contract string) []string {
+	versions := []string{}
+	for _, p := range c.Providers {
+		if p.Name == provider {
+			for _, v := range p.Versions {
+				if contract == "*" || v.Contract == contract {
+					versions = append(versions, v.Name)
+				}
+			}
+		}
+	}
+
+	sort.Slice(versions, func(i, j int) bool {
+		// NOTE: Ignoring errors because the validity of the format is ensured by Validation.
+		vI, _ := version.ParseSemantic(versions[i])
+		vJ, _ := version.ParseSemantic(versions[j])
+		return vI.LessThan(vJ)
+	})
+	return versions
 }

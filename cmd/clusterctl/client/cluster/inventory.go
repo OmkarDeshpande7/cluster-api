@@ -27,7 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	clusterctlv1 "sigs.k8s.io/cluster-api/cmd/clusterctl/api/v1alpha3"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/config"
 	logf "sigs.k8s.io/cluster-api/cmd/clusterctl/log"
@@ -51,8 +51,8 @@ type CheckCAPIContractOptions struct {
 	// AllowCAPINotInstalled instructs CheckCAPIContract to tolerate management clusters without Cluster API installed yet.
 	AllowCAPINotInstalled bool
 
-	// AllowCAPIContract instructs CheckCAPIContract to tolerate management clusters with Cluster API with the given contract.
-	AllowCAPIContract string
+	// AllowCAPIContracts instructs CheckCAPIContract to tolerate management clusters with Cluster API with the given contract.
+	AllowCAPIContracts []string
 }
 
 // AllowCAPINotInstalled instructs CheckCAPIContract to tolerate management clusters without Cluster API installed yet.
@@ -72,7 +72,7 @@ type AllowCAPIContract struct {
 
 // Apply applies this configuration to the given CheckCAPIContractOptions.
 func (t AllowCAPIContract) Apply(in *CheckCAPIContractOptions) {
-	in.AllowCAPIContract = t.Contract
+	in.AllowCAPIContracts = append(in.AllowCAPIContracts, t.Contract)
 }
 
 // InventoryClient exposes methods to interface with a cluster's provider inventory.
@@ -93,18 +93,11 @@ type InventoryClient interface {
 	// this as the default provider; In case there are more provider of the same type, there is no default provider.
 	GetDefaultProviderName(providerType clusterctlv1.ProviderType) (string, error)
 
-	// GetDefaultProviderVersion returns the default version for a given provider.
-	// In case there is only a single version installed for a given provider, e.g. only the v0.4.1 version for the AWS provider, it returns
-	// this as the default version; In case there are more version installed for the same provider, there is no default provider version.
-	GetDefaultProviderVersion(provider string, providerType clusterctlv1.ProviderType) (string, error)
+	// GetProviderVersion returns the version for a given provider.
+	GetProviderVersion(provider string, providerType clusterctlv1.ProviderType) (string, error)
 
-	// GetDefaultProviderNamespace returns the default namespace for a given provider.
-	// In case there is only a single instance for a given provider, e.g. only the AWS provider in the capa-system namespace, it returns
-	// this as the default namespace; In case there are more instances for the same provider installed in different namespaces, there is no default provider namespace.
-	GetDefaultProviderNamespace(provider string, providerType clusterctlv1.ProviderType) (string, error)
-
-	// GetManagementGroups returns the list of management groups defined in the management cluster.
-	GetManagementGroups() (ManagementGroupList, error)
+	// GetProviderNamespace returns the namespace for a given provider.
+	GetProviderNamespace(provider string, providerType clusterctlv1.ProviderType) (string, error)
 
 	// CheckCAPIContract checks the Cluster API version installed in the management cluster, and fails if this version
 	// does not match the current one supported by clusterctl.
@@ -247,7 +240,7 @@ func (p *inventoryClient) createObj(o unstructured.Unstructured) error {
 	if labels == nil {
 		labels = map[string]string{}
 	}
-	labels[clusterctlv1.ClusterctlCoreLabelName] = "inventory"
+	labels[clusterctlv1.ClusterctlCoreLabelName] = clusterctlv1.ClusterctlCoreLabelInventoryValue
 	o.SetLabels(labels)
 
 	if err := c.Create(ctx, &o); err != nil {
@@ -278,7 +271,7 @@ func (p *inventoryClient) Create(m clusterctlv1.Provider) error {
 				return errors.Wrapf(err, "failed to get current provider object")
 			}
 
-			//if it does not exists, create the provider object
+			// if it does not exists, create the provider object
 			if err := cl.Create(ctx, &m); err != nil {
 				return errors.Wrapf(err, "failed to create provider object")
 			}
@@ -343,7 +336,7 @@ func (p *inventoryClient) GetDefaultProviderName(providerType clusterctlv1.Provi
 	return "", nil
 }
 
-func (p *inventoryClient) GetDefaultProviderVersion(provider string, providerType clusterctlv1.ProviderType) (string, error) {
+func (p *inventoryClient) GetProviderVersion(provider string, providerType clusterctlv1.ProviderType) (string, error) {
 	providerList, err := p.List()
 	if err != nil {
 		return "", err
@@ -359,11 +352,11 @@ func (p *inventoryClient) GetDefaultProviderVersion(provider string, providerTyp
 		return versions.List()[0], nil
 	}
 
-	// There is no version installed or more than one version installed for this provider; in both cases, a default version for this provider cannot be decided.
+	// The default version for this provider cannot be decided.
 	return "", nil
 }
 
-func (p *inventoryClient) GetDefaultProviderNamespace(provider string, providerType clusterctlv1.ProviderType) (string, error) {
+func (p *inventoryClient) GetProviderNamespace(provider string, providerType clusterctlv1.ProviderType) (string, error) {
 	providerList, err := p.List()
 	if err != nil {
 		return "", err
@@ -379,7 +372,7 @@ func (p *inventoryClient) GetDefaultProviderNamespace(provider string, providerT
 		return namespaces.List()[0], nil
 	}
 
-	// There is no provider or more than one namespace for this provider; in both cases, a default provider namespace cannot be decided.
+	// The default provider namespace cannot be decided.
 	return "", nil
 }
 
@@ -404,8 +397,13 @@ func (p *inventoryClient) CheckCAPIContract(options ...CheckCAPIContractOption) 
 
 	for _, version := range crd.Spec.Versions {
 		if version.Storage {
-			if version.Name == clusterv1.GroupVersion.Version || version.Name == opt.AllowCAPIContract {
+			if version.Name == clusterv1.GroupVersion.Version {
 				return nil
+			}
+			for _, allowedContract := range opt.AllowCAPIContracts {
+				if version.Name == allowedContract {
+					return nil
+				}
 			}
 			return errors.Errorf("this version of clusterctl could be used only with %q management clusters, %q detected", clusterv1.GroupVersion.Version, version.Name)
 		}

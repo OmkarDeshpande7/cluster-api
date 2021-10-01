@@ -22,13 +22,13 @@ import (
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/pointer"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func TestMachineSetScheme(t *testing.T) {
 	g := NewWithT(t)
-	ns, err := testEnv.CreateNamespace(ctx, "schema-test")
+	ns, err := env.CreateNamespace(ctx, "schema-test")
 	g.Expect(err).ToNot(HaveOccurred())
 
 	testMachineSet := &clusterv1.MachineSet{
@@ -46,10 +46,10 @@ func TestMachineSetScheme(t *testing.T) {
 		},
 	}
 
-	g.Expect(testEnv.Create(ctx, testMachineSet)).To(Succeed())
+	g.Expect(env.Create(ctx, testMachineSet)).To(Succeed())
 
 	defer func(do ...client.Object) {
-		g.Expect(testEnv.Cleanup(ctx, do...)).To(Succeed())
+		g.Expect(env.Cleanup(ctx, do...)).To(Succeed())
 	}(ns, testMachineSet)
 
 	g.Expect(testMachineSet.Spec.Replicas).To(Equal(pointer.Int32Ptr(1)))
@@ -57,7 +57,7 @@ func TestMachineSetScheme(t *testing.T) {
 
 func TestMachineDeploymentScheme(t *testing.T) {
 	g := NewWithT(t)
-	ns, err := testEnv.CreateNamespace(ctx, "schema-test")
+	ns, err := env.CreateNamespace(ctx, "schema-test")
 	g.Expect(err).ToNot(HaveOccurred())
 
 	testMachineDeployment := &clusterv1.MachineDeployment{
@@ -75,10 +75,10 @@ func TestMachineDeploymentScheme(t *testing.T) {
 		},
 	}
 
-	g.Expect(testEnv.Create(ctx, testMachineDeployment)).To(Succeed())
+	g.Expect(env.Create(ctx, testMachineDeployment)).To(Succeed())
 
 	defer func(do ...client.Object) {
-		g.Expect(testEnv.Cleanup(ctx, do...)).To(Succeed())
+		g.Expect(env.Cleanup(ctx, do...)).To(Succeed())
 	}(ns, testMachineDeployment)
 
 	g.Expect(testMachineDeployment.Spec.Replicas).To(Equal(pointer.Int32Ptr(1)))

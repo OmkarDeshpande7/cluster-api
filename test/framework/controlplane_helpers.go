@@ -25,9 +25,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/utils/pointer"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
-	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha4"
-	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1beta1"
+	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
 	"sigs.k8s.io/cluster-api/test/framework/internal/log"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -108,7 +108,7 @@ func WaitForKubeadmControlPlaneMachinesToExist(ctx context.Context, input WaitFo
 	}, intervals...).Should(Equal(int(*input.ControlPlane.Spec.Replicas)))
 }
 
-// WaitForOneKubeadmControlPlaneMachinesToExistInput is the input for WaitForKubeadmControlPlaneMachinesToExist.
+// WaitForOneKubeadmControlPlaneMachineToExistInput is the input for WaitForKubeadmControlPlaneMachinesToExist.
 type WaitForOneKubeadmControlPlaneMachineToExistInput struct {
 	Lister       Lister
 	Cluster      *clusterv1.Cluster
@@ -300,6 +300,12 @@ func UpgradeControlPlaneAndWaitForUpgrade(ctx context.Context, input UpgradeCont
 	Expect(err).ToNot(HaveOccurred())
 
 	input.ControlPlane.Spec.Version = input.KubernetesUpgradeVersion
+
+	// If the ClusterConfiguration is not specified, create an empty one.
+	if input.ControlPlane.Spec.KubeadmConfigSpec.ClusterConfiguration == nil {
+		input.ControlPlane.Spec.KubeadmConfigSpec.ClusterConfiguration = new(bootstrapv1.ClusterConfiguration)
+	}
+
 	input.ControlPlane.Spec.KubeadmConfigSpec.ClusterConfiguration.Etcd = bootstrapv1.Etcd{
 		Local: &bootstrapv1.LocalEtcd{
 			ImageMeta: bootstrapv1.ImageMeta{

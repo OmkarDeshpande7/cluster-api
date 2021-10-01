@@ -27,8 +27,8 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2/klogr"
 	"k8s.io/utils/pointer"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
-	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controlplane/kubeadm/internal"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -41,7 +41,7 @@ func TestKubeadmControlPlaneReconciler_updateStatusNoMachines(t *testing.T) {
 	cluster := &clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "foo",
-			Namespace: "test",
+			Namespace: metav1.NamespaceDefault,
 		},
 	}
 
@@ -56,12 +56,19 @@ func TestKubeadmControlPlaneReconciler_updateStatusNoMachines(t *testing.T) {
 		},
 		Spec: controlplanev1.KubeadmControlPlaneSpec{
 			Version: "v1.16.6",
+			MachineTemplate: controlplanev1.KubeadmControlPlaneMachineTemplate{
+				InfrastructureRef: corev1.ObjectReference{
+					APIVersion: "test/v1alpha1",
+					Kind:       "UnknownInfraMachine",
+					Name:       "foo",
+				},
+			},
 		},
 	}
 	kcp.Default()
 	g.Expect(kcp.ValidateCreate()).To(Succeed())
 
-	fakeClient := newFakeClient(g, kcp.DeepCopy(), cluster.DeepCopy())
+	fakeClient := newFakeClient(kcp.DeepCopy(), cluster.DeepCopy())
 	log.SetLogger(klogr.New())
 
 	r := &KubeadmControlPlaneReconciler{
@@ -90,7 +97,7 @@ func TestKubeadmControlPlaneReconciler_updateStatusAllMachinesNotReady(t *testin
 	cluster := &clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "foo",
-			Namespace: "test",
+			Namespace: metav1.NamespaceDefault,
 		},
 	}
 
@@ -105,6 +112,13 @@ func TestKubeadmControlPlaneReconciler_updateStatusAllMachinesNotReady(t *testin
 		},
 		Spec: controlplanev1.KubeadmControlPlaneSpec{
 			Version: "v1.16.6",
+			MachineTemplate: controlplanev1.KubeadmControlPlaneMachineTemplate{
+				InfrastructureRef: corev1.ObjectReference{
+					APIVersion: "test/v1alpha1",
+					Kind:       "UnknownInfraMachine",
+					Name:       "foo",
+				},
+			},
 		},
 	}
 	kcp.Default()
@@ -119,7 +133,7 @@ func TestKubeadmControlPlaneReconciler_updateStatusAllMachinesNotReady(t *testin
 		machines[m.Name] = m
 	}
 
-	fakeClient := newFakeClient(g, objs...)
+	fakeClient := newFakeClient(objs...)
 	log.SetLogger(klogr.New())
 
 	r := &KubeadmControlPlaneReconciler{
@@ -147,7 +161,7 @@ func TestKubeadmControlPlaneReconciler_updateStatusAllMachinesReady(t *testing.T
 
 	cluster := &clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "test",
+			Namespace: metav1.NamespaceDefault,
 			Name:      "foo",
 		},
 	}
@@ -163,6 +177,13 @@ func TestKubeadmControlPlaneReconciler_updateStatusAllMachinesReady(t *testing.T
 		},
 		Spec: controlplanev1.KubeadmControlPlaneSpec{
 			Version: "v1.16.6",
+			MachineTemplate: controlplanev1.KubeadmControlPlaneMachineTemplate{
+				InfrastructureRef: corev1.ObjectReference{
+					APIVersion: "test/v1alpha1",
+					Kind:       "UnknownInfraMachine",
+					Name:       "foo",
+				},
+			},
 		},
 	}
 	kcp.Default()
@@ -177,7 +198,7 @@ func TestKubeadmControlPlaneReconciler_updateStatusAllMachinesReady(t *testing.T
 		machines[m.Name] = m
 	}
 
-	fakeClient := newFakeClient(g, objs...)
+	fakeClient := newFakeClient(objs...)
 	log.SetLogger(klogr.New())
 
 	r := &KubeadmControlPlaneReconciler{
@@ -214,7 +235,7 @@ func TestKubeadmControlPlaneReconciler_updateStatusMachinesReadyMixed(t *testing
 	cluster := &clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "foo",
-			Namespace: "test",
+			Namespace: metav1.NamespaceDefault,
 		},
 	}
 
@@ -229,6 +250,13 @@ func TestKubeadmControlPlaneReconciler_updateStatusMachinesReadyMixed(t *testing
 		},
 		Spec: controlplanev1.KubeadmControlPlaneSpec{
 			Version: "v1.16.6",
+			MachineTemplate: controlplanev1.KubeadmControlPlaneMachineTemplate{
+				InfrastructureRef: corev1.ObjectReference{
+					APIVersion: "test/v1alpha1",
+					Kind:       "UnknownInfraMachine",
+					Name:       "foo",
+				},
+			},
 		},
 	}
 	kcp.Default()
@@ -244,7 +272,7 @@ func TestKubeadmControlPlaneReconciler_updateStatusMachinesReadyMixed(t *testing
 	m, n := createMachineNodePair("testReady", cluster, kcp, true)
 	objs = append(objs, n, m, kubeadmConfigMap())
 	machines[m.Name] = m
-	fakeClient := newFakeClient(g, objs...)
+	fakeClient := newFakeClient(objs...)
 	log.SetLogger(klogr.New())
 
 	r := &KubeadmControlPlaneReconciler{
@@ -279,7 +307,7 @@ func TestKubeadmControlPlaneReconciler_machinesCreatedIsIsTrueEvenWhenTheNodesAr
 	cluster := &clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "foo",
-			Namespace: "test",
+			Namespace: metav1.NamespaceDefault,
 		},
 	}
 
@@ -295,6 +323,13 @@ func TestKubeadmControlPlaneReconciler_machinesCreatedIsIsTrueEvenWhenTheNodesAr
 		Spec: controlplanev1.KubeadmControlPlaneSpec{
 			Version:  "v1.16.6",
 			Replicas: pointer.Int32Ptr(3),
+			MachineTemplate: controlplanev1.KubeadmControlPlaneMachineTemplate{
+				InfrastructureRef: corev1.ObjectReference{
+					APIVersion: "test/v1alpha1",
+					Kind:       "UnknownInfraMachine",
+					Name:       "foo",
+				},
+			},
 		},
 	}
 	kcp.Default()
@@ -309,7 +344,7 @@ func TestKubeadmControlPlaneReconciler_machinesCreatedIsIsTrueEvenWhenTheNodesAr
 		objs = append(objs, n, m)
 	}
 
-	fakeClient := newFakeClient(g, objs...)
+	fakeClient := newFakeClient(objs...)
 	log.SetLogger(klogr.New())
 
 	// Set all the machines to `not ready`

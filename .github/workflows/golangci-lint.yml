@@ -4,7 +4,6 @@ on:
     types: [opened, edited, synchronize, reopened]
     branches:
       - main
-      - master
 jobs:
   golangci:
     name: lint
@@ -13,12 +12,11 @@ jobs:
       matrix:
         working-directory:
           - ""
-          - test/framework
-          - test/infrastructure/docker
+          - test
     steps:
       - uses: actions/checkout@v2
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v2
         with:
-          version: v1.38
+          version: v1.42.1
           working-directory: ${{matrix.working-directory}}

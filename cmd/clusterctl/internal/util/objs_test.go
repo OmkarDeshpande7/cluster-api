@@ -22,7 +22,11 @@ import (
 
 	. "github.com/onsi/gomega"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 func Test_inspectImages(t *testing.T) {
@@ -49,7 +53,7 @@ func Test_inspectImages(t *testing.T) {
 										"containers": []map[string]interface{}{
 											{
 												"name":  controllerContainerName,
-												"image": "gcr.io/k8s-staging-cluster-api/cluster-api-controller:master",
+												"image": "gcr.io/k8s-staging-cluster-api/cluster-api-controller:main",
 											},
 										},
 									},
@@ -59,7 +63,7 @@ func Test_inspectImages(t *testing.T) {
 					},
 				},
 			},
-			want:    []string{"gcr.io/k8s-staging-cluster-api/cluster-api-controller:master"},
+			want:    []string{"gcr.io/k8s-staging-cluster-api/cluster-api-controller:main"},
 			wantErr: false,
 		},
 		{
@@ -76,11 +80,7 @@ func Test_inspectImages(t *testing.T) {
 										"containers": []map[string]interface{}{
 											{
 												"name":  controllerContainerName,
-												"image": "gcr.io/k8s-staging-cluster-api/cluster-api-controller:master",
-											},
-											{
-												"name":  "kube-rbac-proxy",
-												"image": "gcr.io/kubebuilder/kube-rbac-proxy:v0.8.0",
+												"image": "gcr.io/k8s-staging-cluster-api/cluster-api-controller:main",
 											},
 										},
 									},
@@ -90,7 +90,7 @@ func Test_inspectImages(t *testing.T) {
 					},
 				},
 			},
-			want:    []string{"gcr.io/k8s-staging-cluster-api/cluster-api-controller:master", "gcr.io/kubebuilder/kube-rbac-proxy:v0.8.0"},
+			want:    []string{"gcr.io/k8s-staging-cluster-api/cluster-api-controller:main"},
 			wantErr: false,
 		},
 		{
@@ -107,7 +107,7 @@ func Test_inspectImages(t *testing.T) {
 										"containers": []map[string]interface{}{
 											{
 												"name":  controllerContainerName,
-												"image": "gcr.io/k8s-staging-cluster-api/cluster-api-controller:master",
+												"image": "gcr.io/k8s-staging-cluster-api/cluster-api-controller:main",
 											},
 										},
 										"initContainers": []map[string]interface{}{
@@ -123,7 +123,7 @@ func Test_inspectImages(t *testing.T) {
 					},
 				},
 			},
-			want:    []string{"gcr.io/k8s-staging-cluster-api/cluster-api-controller:master", "gcr.io/k8s-staging-cluster-api/cluster-api-controller:init"},
+			want:    []string{"gcr.io/k8s-staging-cluster-api/cluster-api-controller:main", "gcr.io/k8s-staging-cluster-api/cluster-api-controller:init"},
 			wantErr: false,
 		},
 		{
@@ -140,7 +140,7 @@ func Test_inspectImages(t *testing.T) {
 										"containers": []map[string]interface{}{
 											{
 												"name":  controllerContainerName,
-												"image": "gcr.io/k8s-staging-cluster-api/cluster-api-controller:master",
+												"image": "gcr.io/k8s-staging-cluster-api/cluster-api-controller:main",
 											},
 										},
 										"initContainers": []map[string]interface{}{
@@ -156,7 +156,7 @@ func Test_inspectImages(t *testing.T) {
 					},
 				},
 			},
-			want:    []string{"gcr.io/k8s-staging-cluster-api/cluster-api-controller:master", "gcr.io/k8s-staging-cluster-api/cluster-api-controller:init"},
+			want:    []string{"gcr.io/k8s-staging-cluster-api/cluster-api-controller:main", "gcr.io/k8s-staging-cluster-api/cluster-api-controller:init"},
 			wantErr: false,
 		},
 	}
@@ -271,6 +271,95 @@ func TestFixImages(t *testing.T) {
 			gotImages, err := InspectImages(got)
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(gotImages).To(Equal(tt.want))
+		})
+	}
+}
+
+func TestIsDeploymentWithManager(t *testing.T) {
+	convertor := runtime.DefaultUnstructuredConverter
+
+	depManagerContainer := &appsv1.Deployment{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Deployment",
+			APIVersion: "apps/v1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "manager-deployment",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: controllerContainerName}},
+				},
+			},
+		},
+	}
+	depManagerContainerObj, err := convertor.ToUnstructured(depManagerContainer)
+	if err != nil {
+		t.Fatalf("failed to construct unstructured object of %v: %v", depManagerContainer, err)
+	}
+
+	depNOManagerContainer := &appsv1.Deployment{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Deployment",
+			APIVersion: "apps/v1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "not-manager-deployment",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "not-manager"}},
+				},
+			},
+		},
+	}
+	depNOManagerContainerObj, err := convertor.ToUnstructured(depNOManagerContainer)
+	if err != nil {
+		t.Fatalf("failed to construct unstructured object of %v : %v", depNOManagerContainer, err)
+	}
+
+	svc := &corev1.Service{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Service",
+			APIVersion: "v1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-service",
+		},
+	}
+	svcObj, err := convertor.ToUnstructured(svc)
+	if err != nil {
+		t.Fatalf("failed to construct unstructured object of %v : %v", svc, err)
+	}
+
+	tests := []struct {
+		name     string
+		obj      unstructured.Unstructured
+		expected bool
+	}{
+		{
+			name:     "deployment with manager container",
+			obj:      unstructured.Unstructured{Object: depManagerContainerObj},
+			expected: true,
+		},
+		{
+			name:     "deployment without manager container",
+			obj:      unstructured.Unstructured{Object: depNOManagerContainerObj},
+			expected: false,
+		},
+		{
+			name:     "not a deployment",
+			obj:      unstructured.Unstructured{Object: svcObj},
+			expected: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			g := NewWithT(t)
+			actual := IsDeploymentWithManager(test.obj)
+			g.Expect(actual).To(Equal(test.expected))
 		})
 	}
 }

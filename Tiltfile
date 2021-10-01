@@ -45,6 +45,8 @@ providers = {
             "exp",
             "feature",
         ],
+        "label": "CAPI",
+        "manager_name": "capi-controller-manager",
     },
     "kubeadm-bootstrap": {
         "context": "bootstrap/kubeadm",
@@ -54,7 +56,11 @@ providers = {
             "api",
             "controllers",
             "internal",
+            "../../go.mod",
+            "../../go.sum",
         ],
+        "label": "CABPK",
+        "manager_name": "capi-kubeadm-bootstrap-controller-manager",
     },
     "kubeadm-control-plane": {
         "context": "controlplane/kubeadm",
@@ -64,15 +70,19 @@ providers = {
             "api",
             "controllers",
             "internal",
+            "../../go.mod",
+            "../../go.sum",
         ],
+        "label": "KCP",
+        "manager_name": "capi-kubeadm-control-plane-controller-manager",
     },
     "docker": {
         "context": "test/infrastructure/docker",
         "image": "gcr.io/k8s-staging-cluster-api/capd-manager",
         "live_reload_deps": [
             "main.go",
-            "go.mod",
-            "go.sum",
+            "../../go.mod",
+            "../../go.sum",
             "api",
             "cloudinit",
             "controllers",
@@ -81,13 +91,13 @@ providers = {
             "third_party",
         ],
         "additional_docker_helper_commands": """
-RUN wget -qO- https://dl.k8s.io/v1.19.2/kubernetes-client-linux-amd64.tar.gz | tar xvz
-RUN wget -qO- https://get.docker.com | sh
+RUN wget -qO- https://dl.k8s.io/v1.21.2/kubernetes-client-linux-amd64.tar.gz | tar xvz
 """,
         "additional_docker_build_commands": """
-COPY --from=tilt-helper /usr/bin/docker /usr/bin/docker
 COPY --from=tilt-helper /go/kubernetes/client/bin/kubectl /usr/bin/kubectl
 """,
+        "label": "CAPD",
+        "manager_name": "capd-controller-manager",
     },
 }
 
@@ -126,7 +136,7 @@ def load_provider_tiltfiles():
 
 tilt_helper_dockerfile_header = """
 # Tilt image
-FROM golang:1.16.2 as tilt-helper
+FROM golang:1.16.8 as tilt-helper
 # Support live reloading with Tilt
 RUN wget --output-document /restart.sh --quiet https://raw.githubusercontent.com/windmilleng/rerun-process-wrapper/master/restart.sh  && \
     wget --output-document /start.sh --quiet https://raw.githubusercontent.com/windmilleng/rerun-process-wrapper/master/start.sh && \
@@ -151,6 +161,7 @@ def enable_provider(name):
 
     context = p.get("context")
     go_main = p.get("go_main", "main.go")
+    label = p.get("label", name)
 
     # Prefix each live reload dependency with context. For example, for if the context is
     # test/infra/docker and main.go is listed as a dep, the result is test/infra/docker/main.go. This adjustment is
@@ -162,9 +173,10 @@ def enable_provider(name):
     # Set up a local_resource build of the provider's manager binary. The provider is expected to have a main.go in
     # manager_build_path or the main.go must be provided via go_main option. The binary is written to .tiltbuild/manager.
     local_resource(
-        name + "_manager",
+        label.lower() + "_binary",
         cmd = "cd " + context + ';mkdir -p .tiltbuild;CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags \'-extldflags "-static"\' -o .tiltbuild/manager ' + go_main,
         deps = live_reload_deps,
+        labels = [label, "ALL.binaries"],
     )
 
     additional_docker_helper_commands = p.get("additional_docker_helper_commands", "")
@@ -208,6 +220,14 @@ def enable_provider(name):
         yaml = str(kustomize_with_envsubst(context + "/config/default"))
         k8s_yaml(blob(yaml))
 
+        manager_name = p.get("manager_name")
+        if manager_name:
+            k8s_resource(
+                workload = manager_name,
+                new_name = label.lower() + "_controller",
+                labels = [label, "ALL.controllers"],
+            )
+
 # Users may define their own Tilt customizations in tilt.d. This directory is excluded from git and these files will
 # not be checked in to version control.
 def include_user_tilt_files():
@@ -236,6 +256,6 @@ load_provider_tiltfiles()
 load("ext://cert_manager", "deploy_cert_manager")
 
 if settings.get("deploy_cert_manager"):
-    deploy_cert_manager(version = "v1.1.0")
+    deploy_cert_manager(version = "v1.5.3")
 
 enable_providers()

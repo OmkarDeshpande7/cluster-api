@@ -21,35 +21,35 @@ import (
 	"time"
 
 	. "github.com/onsi/gomega"
-
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/pointer"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
-	"sigs.k8s.io/cluster-api/controllers/external"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controllers/remote"
-	"sigs.k8s.io/cluster-api/test/helpers"
+	"sigs.k8s.io/cluster-api/internal/builder"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 func TestWatches(t *testing.T) {
 	g := NewWithT(t)
-	ns, err := testEnv.CreateNamespace(ctx, "test-machine-watches")
+	ns, err := env.CreateNamespace(ctx, "test-machine-watches")
 	g.Expect(err).ToNot(HaveOccurred())
 
 	infraMachine := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"kind":       "InfrastructureMachine",
-			"apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha4",
+			"kind":       "GenericInfrastructureMachine",
+			"apiVersion": "infrastructure.cluster.x-k8s.io/v1beta1",
 			"metadata": map[string]interface{}{
 				"name":      "infra-config1",
 				"namespace": ns.Name,
@@ -71,8 +71,8 @@ func TestWatches(t *testing.T) {
 
 	defaultBootstrap := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"kind":       "BootstrapMachine",
-			"apiVersion": "bootstrap.cluster.x-k8s.io/v1alpha4",
+			"kind":       "GenericBootstrapConfig",
+			"apiVersion": "bootstrap.cluster.x-k8s.io/v1beta1",
 			"metadata": map[string]interface{}{
 				"name":      "bootstrap-config-machinereconcile",
 				"namespace": ns.Name,
@@ -99,24 +99,24 @@ func TestWatches(t *testing.T) {
 		},
 	}
 
-	g.Expect(testEnv.Create(ctx, testCluster)).To(BeNil())
-	g.Expect(testEnv.CreateKubeconfigSecret(ctx, testCluster)).To(Succeed())
-	g.Expect(testEnv.Create(ctx, defaultBootstrap)).To(BeNil())
-	g.Expect(testEnv.Create(ctx, node)).To(Succeed())
-	g.Expect(testEnv.Create(ctx, infraMachine)).To(BeNil())
+	g.Expect(env.Create(ctx, testCluster)).To(BeNil())
+	g.Expect(env.CreateKubeconfigSecret(ctx, testCluster)).To(Succeed())
+	g.Expect(env.Create(ctx, defaultBootstrap)).To(BeNil())
+	g.Expect(env.Create(ctx, node)).To(Succeed())
+	g.Expect(env.Create(ctx, infraMachine)).To(BeNil())
 
 	defer func(do ...client.Object) {
-		g.Expect(testEnv.Cleanup(ctx, do...)).To(Succeed())
+		g.Expect(env.Cleanup(ctx, do...)).To(Succeed())
 	}(ns, testCluster, defaultBootstrap)
 
 	// Patch infra machine ready
-	patchHelper, err := patch.NewHelper(infraMachine, testEnv)
+	patchHelper, err := patch.NewHelper(infraMachine, env)
 	g.Expect(err).ShouldNot(HaveOccurred())
 	g.Expect(unstructured.SetNestedField(infraMachine.Object, true, "status", "ready")).To(Succeed())
 	g.Expect(patchHelper.Patch(ctx, infraMachine, patch.WithStatusObservedGeneration{})).To(Succeed())
 
 	// Patch bootstrap ready
-	patchHelper, err = patch.NewHelper(defaultBootstrap, testEnv)
+	patchHelper, err = patch.NewHelper(defaultBootstrap, env)
 	g.Expect(err).ShouldNot(HaveOccurred())
 	g.Expect(unstructured.SetNestedField(defaultBootstrap.Object, true, "status", "ready")).To(Succeed())
 	g.Expect(unstructured.SetNestedField(defaultBootstrap.Object, "secretData", "status", "dataSecretName")).To(Succeed())
@@ -133,92 +133,62 @@ func TestWatches(t *testing.T) {
 		Spec: clusterv1.MachineSpec{
 			ClusterName: testCluster.Name,
 			InfrastructureRef: corev1.ObjectReference{
-				APIVersion: "infrastructure.cluster.x-k8s.io/v1alpha4",
-				Kind:       "InfrastructureMachine",
+				APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+				Kind:       "GenericInfrastructureMachine",
 				Name:       "infra-config1",
 			},
 			Bootstrap: clusterv1.Bootstrap{
 				ConfigRef: &corev1.ObjectReference{
-					APIVersion: "bootstrap.cluster.x-k8s.io/v1alpha4",
-					Kind:       "BootstrapMachine",
+					APIVersion: "bootstrap.cluster.x-k8s.io/v1beta1",
+					Kind:       "GenericBootstrapConfig",
 					Name:       "bootstrap-config-machinereconcile",
 				},
 			}},
 	}
 
-	g.Expect(testEnv.Create(ctx, machine)).To(BeNil())
+	g.Expect(env.Create(ctx, machine)).To(BeNil())
 	defer func() {
-		g.Expect(testEnv.Cleanup(ctx, machine)).To(Succeed())
+		g.Expect(env.Cleanup(ctx, machine)).To(Succeed())
 	}()
 
 	// Wait for reconciliation to happen.
 	// Since infra and bootstrap objects are ready, a nodeRef will be assigned during node reconciliation.
 	key := client.ObjectKey{Name: machine.Name, Namespace: machine.Namespace}
 	g.Eventually(func() bool {
-		if err := testEnv.Get(ctx, key, machine); err != nil {
+		if err := env.Get(ctx, key, machine); err != nil {
 			return false
 		}
 		return machine.Status.NodeRef != nil
 	}, timeout).Should(BeTrue())
 
 	// Node deletion will trigger node watchers and a request will be added to the queue.
-	g.Expect(testEnv.Delete(ctx, node)).To(Succeed())
+	g.Expect(env.Delete(ctx, node)).To(Succeed())
 	// TODO: Once conditions are in place, check if node deletion triggered a reconcile.
 
 	// Delete infra machine, external tracker will trigger reconcile
 	// and machine Status.FailureReason should be non-nil after reconcileInfrastructure
-	g.Expect(testEnv.Delete(ctx, infraMachine)).To(Succeed())
+	g.Expect(env.Delete(ctx, infraMachine)).To(Succeed())
 	g.Eventually(func() bool {
-		if err := testEnv.Get(ctx, key, machine); err != nil {
+		if err := env.Get(ctx, key, machine); err != nil {
 			return false
 		}
 		return machine.Status.FailureMessage != nil
 	}, timeout).Should(BeTrue())
 }
 
-func TestIndexMachineByNodeName(t *testing.T) {
-	r := &MachineReconciler{}
-	testCases := []struct {
-		name     string
-		object   client.Object
-		expected []string
-	}{
-		{
-			name:     "when the machine has no NodeRef",
-			object:   &clusterv1.Machine{},
-			expected: []string{},
-		},
-		{
-			name: "when the machine has valid a NodeRef",
-			object: &clusterv1.Machine{
-				Status: clusterv1.MachineStatus{
-					NodeRef: &corev1.ObjectReference{
-						Name: "node1",
-					},
-				},
-			},
-			expected: []string{"node1"},
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			g := NewWithT(t)
-			got := r.indexMachineByNodeName(tc.object)
-			g.Expect(got).To(ConsistOf(tc.expected))
-		})
-	}
-}
-
 func TestMachine_Reconcile(t *testing.T) {
 	g := NewWithT(t)
+
+	ns, err := env.CreateNamespace(ctx, "test-machine-reconcile")
+	g.Expect(err).ToNot(HaveOccurred())
+
 	infraMachine := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"kind":       "InfrastructureMachine",
-			"apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha4",
+			"kind":       "GenericInfrastructureMachine",
+			"apiVersion": "infrastructure.cluster.x-k8s.io/v1beta1",
 			"metadata": map[string]interface{}{
 				"name":      "infra-config1",
-				"namespace": "default",
+				"namespace": ns.Name,
 			},
 			"spec": map[string]interface{}{
 				"providerID": "test://id-1",
@@ -228,11 +198,11 @@ func TestMachine_Reconcile(t *testing.T) {
 
 	defaultBootstrap := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"kind":       "BootstrapMachine",
-			"apiVersion": "bootstrap.cluster.x-k8s.io/v1alpha4",
+			"kind":       "GenericBootstrapConfig",
+			"apiVersion": "bootstrap.cluster.x-k8s.io/v1beta1",
 			"metadata": map[string]interface{}{
 				"name":      "bootstrap-config-machinereconcile",
-				"namespace": "default",
+				"namespace": ns.Name,
 			},
 			"spec":   map[string]interface{}{},
 			"status": map[string]interface{}{},
@@ -242,35 +212,35 @@ func TestMachine_Reconcile(t *testing.T) {
 	testCluster := &clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "machine-reconcile-",
-			Namespace:    "default",
+			Namespace:    ns.Name,
 		},
 	}
 
-	g.Expect(testEnv.Create(ctx, testCluster)).To(BeNil())
-	g.Expect(testEnv.Create(ctx, infraMachine)).To(BeNil())
-	g.Expect(testEnv.Create(ctx, defaultBootstrap)).To(BeNil())
+	g.Expect(env.Create(ctx, testCluster)).To(BeNil())
+	g.Expect(env.Create(ctx, infraMachine)).To(BeNil())
+	g.Expect(env.Create(ctx, defaultBootstrap)).To(BeNil())
 
 	defer func(do ...client.Object) {
-		g.Expect(testEnv.Cleanup(ctx, do...)).To(Succeed())
-	}(testCluster)
+		g.Expect(env.Cleanup(ctx, do...)).To(Succeed())
+	}(ns, testCluster, defaultBootstrap)
 
 	machine := &clusterv1.Machine{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "machine-created-",
-			Namespace:    "default",
+			Namespace:    ns.Name,
 			Finalizers:   []string{clusterv1.MachineFinalizer},
 		},
 		Spec: clusterv1.MachineSpec{
 			ClusterName: testCluster.Name,
 			InfrastructureRef: corev1.ObjectReference{
-				APIVersion: "infrastructure.cluster.x-k8s.io/v1alpha4",
-				Kind:       "InfrastructureMachine",
+				APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+				Kind:       "GenericInfrastructureMachine",
 				Name:       "infra-config1",
 			},
 			Bootstrap: clusterv1.Bootstrap{
 				ConfigRef: &corev1.ObjectReference{
-					APIVersion: "bootstrap.cluster.x-k8s.io/v1alpha4",
-					Kind:       "BootstrapMachine",
+					APIVersion: "bootstrap.cluster.x-k8s.io/v1beta1",
+					Kind:       "GenericBootstrapConfig",
 					Name:       "bootstrap-config-machinereconcile",
 				},
 			}},
@@ -280,13 +250,13 @@ func TestMachine_Reconcile(t *testing.T) {
 			},
 		},
 	}
-	g.Expect(testEnv.Create(ctx, machine)).To(BeNil())
+	g.Expect(env.Create(ctx, machine)).To(BeNil())
 
 	key := client.ObjectKey{Name: machine.Name, Namespace: machine.Namespace}
 
 	// Wait for reconciliation to happen when infra and bootstrap objects are not ready.
 	g.Eventually(func() bool {
-		if err := testEnv.Get(ctx, key, machine); err != nil {
+		if err := env.Get(ctx, key, machine); err != nil {
 			return false
 		}
 		return len(machine.Finalizers) > 0
@@ -295,16 +265,16 @@ func TestMachine_Reconcile(t *testing.T) {
 	// Set bootstrap ready.
 	bootstrapPatch := client.MergeFrom(defaultBootstrap.DeepCopy())
 	g.Expect(unstructured.SetNestedField(defaultBootstrap.Object, true, "status", "ready")).NotTo(HaveOccurred())
-	g.Expect(testEnv.Status().Patch(ctx, defaultBootstrap, bootstrapPatch)).To(Succeed())
+	g.Expect(env.Status().Patch(ctx, defaultBootstrap, bootstrapPatch)).To(Succeed())
 
 	// Set infrastructure ready.
 	infraMachinePatch := client.MergeFrom(infraMachine.DeepCopy())
 	g.Expect(unstructured.SetNestedField(infraMachine.Object, true, "status", "ready")).To(Succeed())
-	g.Expect(testEnv.Status().Patch(ctx, infraMachine, infraMachinePatch)).To(Succeed())
+	g.Expect(env.Status().Patch(ctx, infraMachine, infraMachinePatch)).To(Succeed())
 
 	// Wait for Machine Ready Condition to become True.
 	g.Eventually(func() bool {
-		if err := testEnv.Get(ctx, key, machine); err != nil {
+		if err := env.Get(ctx, key, machine); err != nil {
 			return false
 		}
 		if conditions.Has(machine, clusterv1.InfrastructureReadyCondition) != true {
@@ -314,10 +284,10 @@ func TestMachine_Reconcile(t *testing.T) {
 		return readyCondition.Status == corev1.ConditionTrue
 	}, timeout).Should(BeTrue())
 
-	g.Expect(testEnv.Delete(ctx, machine)).NotTo(HaveOccurred())
+	g.Expect(env.Delete(ctx, machine)).NotTo(HaveOccurred())
 	// Wait for Machine to be deleted.
 	g.Eventually(func() bool {
-		if err := testEnv.Get(ctx, key, machine); err != nil {
+		if err := env.Get(ctx, key, machine); err != nil {
 			if apierrors.IsNotFound(err) {
 				return true
 			}
@@ -328,7 +298,7 @@ func TestMachine_Reconcile(t *testing.T) {
 	// Check if Machine deletion successfully deleted infrastructure external reference.
 	keyInfra := client.ObjectKey{Name: infraMachine.GetName(), Namespace: infraMachine.GetNamespace()}
 	g.Eventually(func() bool {
-		if err := testEnv.Get(ctx, keyInfra, infraMachine); err != nil {
+		if err := env.Get(ctx, keyInfra, infraMachine); err != nil {
 			if apierrors.IsNotFound(err) {
 				return true
 			}
@@ -339,7 +309,7 @@ func TestMachine_Reconcile(t *testing.T) {
 	// Check if Machine deletion successfully deleted bootstrap external reference.
 	keyBootstrap := client.ObjectKey{Name: defaultBootstrap.GetName(), Namespace: defaultBootstrap.GetNamespace()}
 	g.Eventually(func() bool {
-		if err := testEnv.Get(ctx, keyBootstrap, defaultBootstrap); err != nil {
+		if err := env.Get(ctx, keyBootstrap, defaultBootstrap); err != nil {
 			if apierrors.IsNotFound(err) {
 				return true
 			}
@@ -352,15 +322,15 @@ func TestMachineFinalizer(t *testing.T) {
 	bootstrapData := "some valid data"
 	clusterCorrectMeta := &clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "default",
 			Name:      "valid-cluster",
+			Namespace: metav1.NamespaceDefault,
 		},
 	}
 
 	machineValidCluster := &clusterv1.Machine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "machine1",
-			Namespace: "default",
+			Namespace: metav1.NamespaceDefault,
 		},
 		Spec: clusterv1.MachineSpec{
 			Bootstrap: clusterv1.Bootstrap{
@@ -373,7 +343,7 @@ func TestMachineFinalizer(t *testing.T) {
 	machineWithFinalizer := &clusterv1.Machine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       "machine2",
-			Namespace:  "default",
+			Namespace:  metav1.NamespaceDefault,
 			Finalizers: []string{"some-other-finalizer"},
 		},
 		Spec: clusterv1.MachineSpec{
@@ -413,12 +383,11 @@ func TestMachineFinalizer(t *testing.T) {
 			g := NewWithT(t)
 
 			mr := &MachineReconciler{
-				Client: helpers.NewFakeClientWithScheme(
-					scheme.Scheme,
+				Client: fake.NewClientBuilder().WithObjects(
 					clusterCorrectMeta,
 					machineValidCluster,
 					machineWithFinalizer,
-				),
+				).Build(),
 			}
 
 			_, _ = mr.Reconcile(ctx, tc.request)
@@ -440,13 +409,13 @@ func TestMachineOwnerReference(t *testing.T) {
 	bootstrapData := "some valid data"
 	testCluster := &clusterv1.Cluster{
 		TypeMeta:   metav1.TypeMeta{Kind: "Cluster", APIVersion: clusterv1.GroupVersion.String()},
-		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "test-cluster"},
+		ObjectMeta: metav1.ObjectMeta{Namespace: metav1.NamespaceDefault, Name: "test-cluster"},
 	}
 
 	machineInvalidCluster := &clusterv1.Machine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "machine1",
-			Namespace: "default",
+			Namespace: metav1.NamespaceDefault,
 		},
 		Spec: clusterv1.MachineSpec{
 			ClusterName: "invalid",
@@ -456,7 +425,7 @@ func TestMachineOwnerReference(t *testing.T) {
 	machineValidCluster := &clusterv1.Machine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "machine2",
-			Namespace: "default",
+			Namespace: metav1.NamespaceDefault,
 		},
 		Spec: clusterv1.MachineSpec{
 			Bootstrap: clusterv1.Bootstrap{
@@ -469,7 +438,7 @@ func TestMachineOwnerReference(t *testing.T) {
 	machineValidMachine := &clusterv1.Machine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "machine3",
-			Namespace: "default",
+			Namespace: metav1.NamespaceDefault,
 			Labels: map[string]string{
 				clusterv1.ClusterLabelName: "valid-cluster",
 			},
@@ -493,7 +462,7 @@ func TestMachineOwnerReference(t *testing.T) {
 	machineValidControlled := &clusterv1.Machine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "machine4",
-			Namespace: "default",
+			Namespace: metav1.NamespaceDefault,
 			Labels: map[string]string{
 				clusterv1.ClusterLabelName:             "valid-cluster",
 				clusterv1.MachineControlPlaneLabelName: "",
@@ -573,14 +542,13 @@ func TestMachineOwnerReference(t *testing.T) {
 			g := NewWithT(t)
 
 			mr := &MachineReconciler{
-				Client: helpers.NewFakeClientWithScheme(
-					scheme.Scheme,
+				Client: fake.NewClientBuilder().WithObjects(
 					testCluster,
 					machineInvalidCluster,
 					machineValidCluster,
 					machineValidMachine,
 					machineValidControlled,
-				),
+				).Build(),
 			}
 
 			key := client.ObjectKey{Namespace: tc.m.Namespace, Name: tc.m.Name}
@@ -608,11 +576,11 @@ func TestMachineOwnerReference(t *testing.T) {
 func TestReconcileRequest(t *testing.T) {
 	infraConfig := unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"kind":       "InfrastructureMachine",
-			"apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha4",
+			"kind":       "GenericInfrastructureMachine",
+			"apiVersion": "infrastructure.cluster.x-k8s.io/v1beta1",
 			"metadata": map[string]interface{}{
 				"name":      "infra-config1",
-				"namespace": "default",
+				"namespace": metav1.NamespaceDefault,
 			},
 			"spec": map[string]interface{}{
 				"providerID": "test://id-1",
@@ -634,14 +602,14 @@ func TestReconcileRequest(t *testing.T) {
 	testCluster := clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-cluster",
-			Namespace: "default",
+			Namespace: metav1.NamespaceDefault,
 		},
 	}
 
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test",
-			Namespace: "default",
+			Namespace: metav1.NamespaceDefault,
 		},
 		Spec: corev1.NodeSpec{ProviderID: "test://id-1"},
 	}
@@ -658,14 +626,14 @@ func TestReconcileRequest(t *testing.T) {
 			machine: clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "created",
-					Namespace:  "default",
+					Namespace:  metav1.NamespaceDefault,
 					Finalizers: []string{clusterv1.MachineFinalizer},
 				},
 				Spec: clusterv1.MachineSpec{
 					ClusterName: "test-cluster",
 					InfrastructureRef: corev1.ObjectReference{
-						APIVersion: "infrastructure.cluster.x-k8s.io/v1alpha4",
-						Kind:       "InfrastructureMachine",
+						APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+						Kind:       "GenericInfrastructureMachine",
 						Name:       "infra-config1",
 					},
 					Bootstrap: clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
@@ -686,14 +654,14 @@ func TestReconcileRequest(t *testing.T) {
 			machine: clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "updated",
-					Namespace:  "default",
+					Namespace:  metav1.NamespaceDefault,
 					Finalizers: []string{clusterv1.MachineFinalizer},
 				},
 				Spec: clusterv1.MachineSpec{
 					ClusterName: "test-cluster",
 					InfrastructureRef: corev1.ObjectReference{
-						APIVersion: "infrastructure.cluster.x-k8s.io/v1alpha4",
-						Kind:       "InfrastructureMachine",
+						APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+						Kind:       "GenericInfrastructureMachine",
 						Name:       "infra-config1",
 					},
 					Bootstrap: clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
@@ -714,7 +682,7 @@ func TestReconcileRequest(t *testing.T) {
 			machine: clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "deleted",
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 					Labels: map[string]string{
 						clusterv1.MachineControlPlaneLabelName: "",
 					},
@@ -724,8 +692,8 @@ func TestReconcileRequest(t *testing.T) {
 				Spec: clusterv1.MachineSpec{
 					ClusterName: "test-cluster",
 					InfrastructureRef: corev1.ObjectReference{
-						APIVersion: "infrastructure.cluster.x-k8s.io/v1alpha4",
-						Kind:       "InfrastructureMachine",
+						APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+						Kind:       "GenericInfrastructureMachine",
 						Name:       "infra-config1",
 					},
 					Bootstrap: clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
@@ -742,14 +710,13 @@ func TestReconcileRequest(t *testing.T) {
 		t.Run("machine should be "+tc.machine.Name, func(t *testing.T) {
 			g := NewWithT(t)
 
-			clientFake := helpers.NewFakeClientWithScheme(
-				scheme.Scheme,
+			clientFake := fake.NewClientBuilder().WithObjects(
 				node,
 				&testCluster,
 				&tc.machine,
-				external.TestGenericInfrastructureCRD.DeepCopy(),
+				builder.GenericInfrastructureMachineCRD.DeepCopy(),
 				&infraConfig,
-			)
+			).Build()
 
 			r := &MachineReconciler{
 				Client:  clientFake,
@@ -772,11 +739,11 @@ func TestMachineConditions(t *testing.T) {
 	infraConfig := func(ready bool) *unstructured.Unstructured {
 		return &unstructured.Unstructured{
 			Object: map[string]interface{}{
-				"kind":       "InfrastructureMachine",
-				"apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha4",
+				"kind":       "GenericInfrastructureMachine",
+				"apiVersion": "infrastructure.cluster.x-k8s.io/v1beta1",
 				"metadata": map[string]interface{}{
 					"name":      "infra-config1",
-					"namespace": "default",
+					"namespace": metav1.NamespaceDefault,
 				},
 				"spec": map[string]interface{}{
 					"providerID": "test://id-1",
@@ -803,11 +770,11 @@ func TestMachineConditions(t *testing.T) {
 		}
 		return &unstructured.Unstructured{
 			Object: map[string]interface{}{
-				"kind":       "BootstrapMachine",
-				"apiVersion": "bootstrap.cluster.x-k8s.io/v1alpha4",
+				"kind":       "GenericBootstrapConfig",
+				"apiVersion": "bootstrap.cluster.x-k8s.io/v1beta1",
 				"metadata": map[string]interface{}{
 					"name":      "bootstrap-config1",
-					"namespace": "default",
+					"namespace": metav1.NamespaceDefault,
 				},
 				"status": status,
 			},
@@ -817,14 +784,14 @@ func TestMachineConditions(t *testing.T) {
 	testCluster := clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-cluster",
-			Namespace: "default",
+			Namespace: metav1.NamespaceDefault,
 		},
 	}
 
 	machine := clusterv1.Machine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "blah",
-			Namespace: "default",
+			Namespace: metav1.NamespaceDefault,
 			Labels: map[string]string{
 				clusterv1.MachineControlPlaneLabelName: "",
 			},
@@ -834,14 +801,14 @@ func TestMachineConditions(t *testing.T) {
 			ProviderID:  pointer.StringPtr("test://id-1"),
 			ClusterName: "test-cluster",
 			InfrastructureRef: corev1.ObjectReference{
-				APIVersion: "infrastructure.cluster.x-k8s.io/v1alpha4",
-				Kind:       "InfrastructureMachine",
+				APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+				Kind:       "GenericInfrastructureMachine",
 				Name:       "infra-config1",
 			},
 			Bootstrap: clusterv1.Bootstrap{
 				ConfigRef: &corev1.ObjectReference{
-					APIVersion: "bootstrap.cluster.x-k8s.io/v1alpha4",
-					Kind:       "BootstrapMachine",
+					APIVersion: "bootstrap.cluster.x-k8s.io/v1beta1",
+					Kind:       "GenericBootstrapConfig",
 					Name:       "bootstrap-config1",
 				},
 			},
@@ -986,16 +953,15 @@ func TestMachineConditions(t *testing.T) {
 				tt.beforeFunc(bootstrap, infra, m)
 			}
 
-			clientFake := helpers.NewFakeClientWithScheme(
-				scheme.Scheme,
+			clientFake := fake.NewClientBuilder().WithObjects(
 				&testCluster,
 				m,
-				external.TestGenericInfrastructureCRD.DeepCopy(),
+				builder.GenericInfrastructureMachineCRD.DeepCopy(),
 				infra,
-				external.TestGenericBootstrapCRD.DeepCopy(),
+				builder.GenericBootstrapConfigCRD.DeepCopy(),
 				bootstrap,
 				node,
-			)
+			).Build()
 
 			r := &MachineReconciler{
 				Client:  clientFake,
@@ -1015,16 +981,16 @@ func TestMachineConditions(t *testing.T) {
 
 func TestReconcileDeleteExternal(t *testing.T) {
 	testCluster := &clusterv1.Cluster{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "test-cluster"},
+		ObjectMeta: metav1.ObjectMeta{Namespace: metav1.NamespaceDefault, Name: "test-cluster"},
 	}
 
 	bootstrapConfig := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"kind":       "BootstrapConfig",
-			"apiVersion": "bootstrap.cluster.x-k8s.io/v1alpha4",
+			"apiVersion": "bootstrap.cluster.x-k8s.io/v1beta1",
 			"metadata": map[string]interface{}{
 				"name":      "delete-bootstrap",
-				"namespace": "default",
+				"namespace": metav1.NamespaceDefault,
 			},
 		},
 	}
@@ -1032,13 +998,13 @@ func TestReconcileDeleteExternal(t *testing.T) {
 	machine := &clusterv1.Machine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "delete",
-			Namespace: "default",
+			Namespace: metav1.NamespaceDefault,
 		},
 		Spec: clusterv1.MachineSpec{
 			ClusterName: "test-cluster",
 			Bootstrap: clusterv1.Bootstrap{
 				ConfigRef: &corev1.ObjectReference{
-					APIVersion: "bootstrap.cluster.x-k8s.io/v1alpha4",
+					APIVersion: "bootstrap.cluster.x-k8s.io/v1beta1",
 					Kind:       "BootstrapConfig",
 					Name:       "delete-bootstrap",
 				},
@@ -1057,12 +1023,12 @@ func TestReconcileDeleteExternal(t *testing.T) {
 			bootstrapExists: true,
 			expected: &unstructured.Unstructured{
 				Object: map[string]interface{}{
-					"apiVersion": "bootstrap.cluster.x-k8s.io/v1alpha4",
+					"apiVersion": "bootstrap.cluster.x-k8s.io/v1beta1",
 					"kind":       "BootstrapConfig",
 					"metadata": map[string]interface{}{
 						"name":            "delete-bootstrap",
-						"namespace":       "default",
-						"resourceVersion": "1",
+						"namespace":       metav1.NamespaceDefault,
+						"resourceVersion": "999",
 					},
 				},
 			},
@@ -1087,7 +1053,7 @@ func TestReconcileDeleteExternal(t *testing.T) {
 			}
 
 			r := &MachineReconciler{
-				Client: helpers.NewFakeClientWithScheme(scheme.Scheme, objs...),
+				Client: fake.NewClientBuilder().WithObjects(objs...).Build(),
 			}
 
 			obj, err := r.reconcileDeleteExternal(ctx, machine, machine.Spec.Bootstrap.ConfigRef)
@@ -1107,21 +1073,21 @@ func TestRemoveMachineFinalizerAfterDeleteReconcile(t *testing.T) {
 	dt := metav1.Now()
 
 	testCluster := &clusterv1.Cluster{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "test-cluster"},
+		ObjectMeta: metav1.ObjectMeta{Namespace: metav1.NamespaceDefault, Name: "test-cluster"},
 	}
 
 	m := &clusterv1.Machine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "delete123",
-			Namespace:         "default",
+			Namespace:         metav1.NamespaceDefault,
 			Finalizers:        []string{clusterv1.MachineFinalizer, "test"},
 			DeletionTimestamp: &dt,
 		},
 		Spec: clusterv1.MachineSpec{
 			ClusterName: "test-cluster",
 			InfrastructureRef: corev1.ObjectReference{
-				APIVersion: "infrastructure.cluster.x-k8s.io/v1alpha4",
-				Kind:       "InfrastructureMachine",
+				APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+				Kind:       "GenericInfrastructureMachine",
 				Name:       "infra-config1",
 			},
 			Bootstrap: clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
@@ -1129,7 +1095,7 @@ func TestRemoveMachineFinalizerAfterDeleteReconcile(t *testing.T) {
 	}
 	key := client.ObjectKey{Namespace: m.Namespace, Name: m.Name}
 	mr := &MachineReconciler{
-		Client: helpers.NewFakeClientWithScheme(scheme.Scheme, testCluster, m),
+		Client: fake.NewClientBuilder().WithObjects(testCluster, m).Build(),
 	}
 	_, err := mr.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 	g.Expect(err).ToNot(HaveOccurred())
@@ -1142,7 +1108,7 @@ func TestRemoveMachineFinalizerAfterDeleteReconcile(t *testing.T) {
 func TestIsNodeDrainedAllowed(t *testing.T) {
 	testCluster := &clusterv1.Cluster{
 		TypeMeta:   metav1.TypeMeta{Kind: "Cluster", APIVersion: clusterv1.GroupVersion.String()},
-		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "test-cluster"},
+		ObjectMeta: metav1.ObjectMeta{Namespace: metav1.NamespaceDefault, Name: "test-cluster"},
 	}
 
 	tests := []struct {
@@ -1155,7 +1121,7 @@ func TestIsNodeDrainedAllowed(t *testing.T) {
 			machine: &clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "test-machine",
-					Namespace:   "default",
+					Namespace:   metav1.NamespaceDefault,
 					Finalizers:  []string{clusterv1.MachineFinalizer},
 					Annotations: map[string]string{clusterv1.ExcludeNodeDrainingAnnotation: "existed!!"},
 				},
@@ -1173,7 +1139,7 @@ func TestIsNodeDrainedAllowed(t *testing.T) {
 			machine: &clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-machine",
-					Namespace:  "default",
+					Namespace:  metav1.NamespaceDefault,
 					Finalizers: []string{clusterv1.MachineFinalizer},
 				},
 				Spec: clusterv1.MachineSpec{
@@ -1200,7 +1166,7 @@ func TestIsNodeDrainedAllowed(t *testing.T) {
 			machine: &clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-machine",
-					Namespace:  "default",
+					Namespace:  metav1.NamespaceDefault,
 					Finalizers: []string{clusterv1.MachineFinalizer},
 				},
 				Spec: clusterv1.MachineSpec{
@@ -1226,7 +1192,7 @@ func TestIsNodeDrainedAllowed(t *testing.T) {
 			machine: &clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-machine",
-					Namespace:  "default",
+					Namespace:  metav1.NamespaceDefault,
 					Finalizers: []string{clusterv1.MachineFinalizer},
 				},
 				Spec: clusterv1.MachineSpec{
@@ -1255,7 +1221,7 @@ func TestIsNodeDrainedAllowed(t *testing.T) {
 			objs = append(objs, testCluster, tt.machine)
 
 			r := &MachineReconciler{
-				Client: helpers.NewFakeClientWithScheme(scheme.Scheme, objs...),
+				Client: fake.NewClientBuilder().WithObjects(objs...).Build(),
 			}
 
 			got := r.isNodeDrainAllowed(tt.machine)
@@ -1278,13 +1244,13 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 			cluster: &clusterv1.Cluster{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-cluster",
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 				},
 			},
 			machine: &clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "created",
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 					Labels: map[string]string{
 						clusterv1.ClusterLabelName: "test-cluster",
 					},
@@ -1304,13 +1270,13 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 			cluster: &clusterv1.Cluster{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-cluster",
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 				},
 			},
 			machine: &clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "created",
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 					Labels: map[string]string{
 						clusterv1.ClusterLabelName: "test-cluster",
 					},
@@ -1334,13 +1300,13 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 			cluster: &clusterv1.Cluster{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-cluster",
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 				},
 			},
 			machine: &clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "created",
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 					Labels: map[string]string{
 						clusterv1.ClusterLabelName:             "test-cluster",
 						clusterv1.MachineControlPlaneLabelName: "",
@@ -1366,13 +1332,13 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 			cluster: &clusterv1.Cluster{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-cluster",
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 				},
 			},
 			machine: &clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "created",
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 					Labels: map[string]string{
 						clusterv1.ClusterLabelName: "test-cluster",
 					},
@@ -1396,7 +1362,7 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 			cluster: &clusterv1.Cluster{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:              "test-cluster",
-					Namespace:         "default",
+					Namespace:         metav1.NamespaceDefault,
 					DeletionTimestamp: &deletionts,
 				},
 			},
@@ -1408,11 +1374,11 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 			cluster: &clusterv1.Cluster{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-cluster",
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 				},
 				Spec: clusterv1.ClusterSpec{
 					ControlPlaneRef: &corev1.ObjectReference{
-						APIVersion: "controlplane.cluster.x-k8s.io/v1alpha4",
+						APIVersion: "controlplane.cluster.x-k8s.io/v1beta1",
 						Kind:       "AWSManagedControlPlane",
 						Name:       "test-cluster",
 						Namespace:  "test-cluster",
@@ -1422,7 +1388,7 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 			machine: &clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "created",
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 					Labels: map[string]string{
 						clusterv1.ClusterLabelName: "test-cluster",
 					},
@@ -1446,11 +1412,11 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 			cluster: &clusterv1.Cluster{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-cluster",
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 				},
 				Spec: clusterv1.ClusterSpec{
 					ControlPlaneRef: &corev1.ObjectReference{
-						APIVersion: "controlplane.cluster.x-k8s.io/v1alpha4",
+						APIVersion: "controlplane.cluster.x-k8s.io/v1beta1",
 						Kind:       "AWSManagedControlPlane",
 						Name:       "test-cluster-2",
 						Namespace:  "test-cluster",
@@ -1460,7 +1426,7 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 			machine: &clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "created",
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 					Labels: map[string]string{
 						clusterv1.ClusterLabelName: "test-cluster",
 					},
@@ -1484,11 +1450,11 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 			cluster: &clusterv1.Cluster{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-cluster",
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 				},
 				Spec: clusterv1.ClusterSpec{
 					ControlPlaneRef: &corev1.ObjectReference{
-						APIVersion: "controlplane.cluster.x-k8s.io/v1alpha4",
+						APIVersion: "controlplane.cluster.x-k8s.io/v1beta1",
 						Kind:       "AWSManagedControlPlane",
 						Name:       "test-cluster-3",
 						Namespace:  "test-cluster",
@@ -1498,7 +1464,7 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 			machine: &clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "created",
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 					Labels: map[string]string{
 						clusterv1.ClusterLabelName: "test-cluster",
 					},
@@ -1526,7 +1492,7 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 			},
 		},
 	}
-	emp.SetAPIVersion("controlplane.cluster.x-k8s.io/v1alpha4")
+	emp.SetAPIVersion("controlplane.cluster.x-k8s.io/v1beta1")
 	emp.SetKind("AWSManagedControlPlane")
 	emp.SetName("test-cluster")
 	emp.SetNamespace("test-cluster")
@@ -1534,7 +1500,7 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 	mcpBeingDeleted := &unstructured.Unstructured{
 		Object: map[string]interface{}{},
 	}
-	mcpBeingDeleted.SetAPIVersion("controlplane.cluster.x-k8s.io/v1alpha4")
+	mcpBeingDeleted.SetAPIVersion("controlplane.cluster.x-k8s.io/v1beta1")
 	mcpBeingDeleted.SetKind("AWSManagedControlPlane")
 	mcpBeingDeleted.SetName("test-cluster-2")
 	mcpBeingDeleted.SetNamespace("test-cluster")
@@ -1547,7 +1513,7 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 			},
 		},
 	}
-	empBeingDeleted.SetAPIVersion("controlplane.cluster.x-k8s.io/v1alpha4")
+	empBeingDeleted.SetAPIVersion("controlplane.cluster.x-k8s.io/v1beta1")
 	empBeingDeleted.SetKind("AWSManagedControlPlane")
 	empBeingDeleted.SetName("test-cluster-3")
 	empBeingDeleted.SetNamespace("test-cluster")
@@ -1560,7 +1526,7 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 			m1 := &clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "cp1",
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 					Labels: map[string]string{
 						clusterv1.ClusterLabelName: "test-cluster",
 					},
@@ -1580,7 +1546,7 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 			m2 := &clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "cp2",
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 					Labels: map[string]string{
 						clusterv1.ClusterLabelName: "test-cluster",
 					},
@@ -1604,8 +1570,7 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 			}
 
 			mr := &MachineReconciler{
-				Client: helpers.NewFakeClientWithScheme(
-					scheme.Scheme,
+				Client: fake.NewClientBuilder().WithObjects(
 					tc.cluster,
 					tc.machine,
 					m1,
@@ -1613,7 +1578,7 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 					emp,
 					mcpBeingDeleted,
 					empBeingDeleted,
-				),
+				).Build(),
 			}
 
 			err := mr.isDeleteNodeAllowed(ctx, tc.cluster, tc.machine)
@@ -1623,6 +1588,268 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 				g.Expect(err).To(Equal(tc.expectedError))
 			}
 		})
+	}
+}
+
+func TestNodeToMachine(t *testing.T) {
+	g := NewWithT(t)
+	ns, err := env.CreateNamespace(ctx, "test-node-to-machine")
+	g.Expect(err).ToNot(HaveOccurred())
+
+	// Set up cluster, machines and nodes to test against.
+	infraMachine := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"kind":       "GenericInfrastructureMachine",
+			"apiVersion": "infrastructure.cluster.x-k8s.io/v1beta1",
+			"metadata": map[string]interface{}{
+				"name":      "infra-config1",
+				"namespace": ns.Name,
+			},
+			"spec": map[string]interface{}{
+				"providerID": "test://id-1",
+			},
+			"status": map[string]interface{}{
+				"ready": true,
+				"addresses": []interface{}{
+					map[string]interface{}{
+						"type":    "InternalIP",
+						"address": "10.0.0.1",
+					},
+				},
+			},
+		},
+	}
+
+	infraMachine2 := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"kind":       "GenericInfrastructureMachine",
+			"apiVersion": "infrastructure.cluster.x-k8s.io/v1beta1",
+			"metadata": map[string]interface{}{
+				"name":      "infra-config2",
+				"namespace": ns.Name,
+			},
+			"spec": map[string]interface{}{
+				"providerID": "test://id-2",
+			},
+			"status": map[string]interface{}{
+				"ready": true,
+				"addresses": []interface{}{
+					map[string]interface{}{
+						"type":    "InternalIP",
+						"address": "10.0.0.1",
+					},
+				},
+			},
+		},
+	}
+
+	defaultBootstrap := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"kind":       "GenericBootstrapConfig",
+			"apiVersion": "bootstrap.cluster.x-k8s.io/v1beta1",
+			"metadata": map[string]interface{}{
+				"name":      "bootstrap-config-machinereconcile",
+				"namespace": ns.Name,
+			},
+			"spec":   map[string]interface{}{},
+			"status": map[string]interface{}{},
+		},
+	}
+
+	testCluster := &clusterv1.Cluster{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "machine-reconcile-",
+			Namespace:    ns.Name,
+		},
+	}
+
+	targetNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node-to-machine-1",
+		},
+		Spec: corev1.NodeSpec{
+			ProviderID: "test:///id-1",
+		},
+	}
+
+	randomNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node-to-machine-node-2",
+		},
+		Spec: corev1.NodeSpec{
+			ProviderID: "test:///id-2",
+		},
+	}
+
+	g.Expect(env.Create(ctx, testCluster)).To(BeNil())
+	g.Expect(env.CreateKubeconfigSecret(ctx, testCluster)).To(Succeed())
+	g.Expect(env.Create(ctx, defaultBootstrap)).To(BeNil())
+	g.Expect(env.Create(ctx, targetNode)).To(Succeed())
+	g.Expect(env.Create(ctx, randomNode)).To(Succeed())
+	g.Expect(env.Create(ctx, infraMachine)).To(BeNil())
+	g.Expect(env.Create(ctx, infraMachine2)).To(BeNil())
+
+	defer func(do ...client.Object) {
+		g.Expect(env.Cleanup(ctx, do...)).To(Succeed())
+	}(ns, testCluster, defaultBootstrap)
+
+	// Patch infra expectedMachine ready
+	patchHelper, err := patch.NewHelper(infraMachine, env)
+	g.Expect(err).ShouldNot(HaveOccurred())
+	g.Expect(unstructured.SetNestedField(infraMachine.Object, true, "status", "ready")).To(Succeed())
+	g.Expect(patchHelper.Patch(ctx, infraMachine, patch.WithStatusObservedGeneration{})).To(Succeed())
+
+	// Patch infra randomMachine ready
+	patchHelper, err = patch.NewHelper(infraMachine2, env)
+	g.Expect(err).ShouldNot(HaveOccurred())
+	g.Expect(unstructured.SetNestedField(infraMachine2.Object, true, "status", "ready")).To(Succeed())
+	g.Expect(patchHelper.Patch(ctx, infraMachine2, patch.WithStatusObservedGeneration{})).To(Succeed())
+
+	// Patch bootstrap ready
+	patchHelper, err = patch.NewHelper(defaultBootstrap, env)
+	g.Expect(err).ShouldNot(HaveOccurred())
+	g.Expect(unstructured.SetNestedField(defaultBootstrap.Object, true, "status", "ready")).To(Succeed())
+	g.Expect(unstructured.SetNestedField(defaultBootstrap.Object, "secretData", "status", "dataSecretName")).To(Succeed())
+	g.Expect(patchHelper.Patch(ctx, defaultBootstrap, patch.WithStatusObservedGeneration{})).To(Succeed())
+
+	expectedMachine := &clusterv1.Machine{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "machine-created-",
+			Namespace:    ns.Name,
+			Labels: map[string]string{
+				clusterv1.MachineControlPlaneLabelName: "",
+			},
+		},
+		Spec: clusterv1.MachineSpec{
+			ClusterName: testCluster.Name,
+			InfrastructureRef: corev1.ObjectReference{
+				APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+				Kind:       "GenericInfrastructureMachine",
+				Name:       "infra-config1",
+			},
+			Bootstrap: clusterv1.Bootstrap{
+				ConfigRef: &corev1.ObjectReference{
+					APIVersion: "bootstrap.cluster.x-k8s.io/v1beta1",
+					Kind:       "GenericBootstrapConfig",
+					Name:       "bootstrap-config-machinereconcile",
+				},
+			}},
+	}
+
+	g.Expect(env.Create(ctx, expectedMachine)).To(BeNil())
+	defer func() {
+		g.Expect(env.Cleanup(ctx, expectedMachine)).To(Succeed())
+	}()
+
+	// Wait for reconciliation to happen.
+	// Since infra and bootstrap objects are ready, a nodeRef will be assigned during node reconciliation.
+	key := client.ObjectKey{Name: expectedMachine.Name, Namespace: expectedMachine.Namespace}
+	g.Eventually(func() bool {
+		if err := env.Get(ctx, key, expectedMachine); err != nil {
+			return false
+		}
+		return expectedMachine.Status.NodeRef != nil
+	}, timeout).Should(BeTrue())
+
+	randomMachine := &clusterv1.Machine{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "machine-created-",
+			Namespace:    ns.Name,
+			Labels: map[string]string{
+				clusterv1.MachineControlPlaneLabelName: "",
+			},
+		},
+		Spec: clusterv1.MachineSpec{
+			ClusterName: testCluster.Name,
+			InfrastructureRef: corev1.ObjectReference{
+				APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+				Kind:       "GenericInfrastructureMachine",
+				Name:       "infra-config2",
+			},
+			Bootstrap: clusterv1.Bootstrap{
+				ConfigRef: &corev1.ObjectReference{
+					APIVersion: "bootstrap.cluster.x-k8s.io/v1beta1",
+					Kind:       "GenericBootstrapConfig",
+					Name:       "bootstrap-config-machinereconcile",
+				},
+			}},
+	}
+
+	g.Expect(env.Create(ctx, randomMachine)).To(BeNil())
+	defer func() {
+		g.Expect(env.Cleanup(ctx, randomMachine)).To(Succeed())
+	}()
+
+	// Wait for reconciliation to happen.
+	// Since infra and bootstrap objects are ready, a nodeRef will be assigned during node reconciliation.
+	key = client.ObjectKey{Name: randomMachine.Name, Namespace: randomMachine.Namespace}
+	g.Eventually(func() bool {
+		if err := env.Get(ctx, key, randomMachine); err != nil {
+			return false
+		}
+		return randomMachine.Status.NodeRef != nil
+	}, timeout).Should(BeTrue())
+
+	// Fake nodes for actual test of nodeToMachine.
+	fakeNodes := []*corev1.Node{
+		// None annotations.
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: targetNode.GetName(),
+			},
+			Spec: corev1.NodeSpec{
+				ProviderID: targetNode.Spec.ProviderID,
+			},
+		},
+		// ClusterNameAnnotation annotation.
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: targetNode.GetName(),
+				Annotations: map[string]string{
+					clusterv1.ClusterNameAnnotation: testCluster.GetName(),
+				},
+			},
+			Spec: corev1.NodeSpec{
+				ProviderID: targetNode.Spec.ProviderID,
+			},
+		},
+		// ClusterNamespaceAnnotation annotation.
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: targetNode.GetName(),
+				Annotations: map[string]string{
+					clusterv1.ClusterNamespaceAnnotation: ns.GetName(),
+				},
+			},
+			Spec: corev1.NodeSpec{
+				ProviderID: targetNode.Spec.ProviderID,
+			},
+		},
+		// Both annotations.
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: targetNode.GetName(),
+				Annotations: map[string]string{
+					clusterv1.ClusterNameAnnotation:      testCluster.GetName(),
+					clusterv1.ClusterNamespaceAnnotation: ns.GetName(),
+				},
+			},
+			Spec: corev1.NodeSpec{
+				ProviderID: targetNode.Spec.ProviderID,
+			},
+		},
+	}
+
+	r := &MachineReconciler{
+		Client: env,
+	}
+	for _, node := range fakeNodes {
+		request := r.nodeToMachine(node)
+		g.Expect(request).To(BeEquivalentTo([]reconcile.Request{
+			{
+				NamespacedName: client.ObjectKeyFromObject(expectedMachine),
+			},
+		}))
 	}
 }
 
@@ -1638,6 +1865,8 @@ func addConditionsToExternal(u *unstructured.Unstructured, newConditions cluster
 
 // asserts the conditions set on the Getter object.
 func assertConditions(t *testing.T, from conditions.Getter, conditions ...*clusterv1.Condition) {
+	t.Helper()
+
 	for _, condition := range conditions {
 		assertCondition(t, from, condition)
 	}
@@ -1647,6 +1876,8 @@ func assertConditions(t *testing.T, from conditions.Getter, conditions ...*clust
 // when the condition is true, asserting the reason/severity/message
 // for the condition are avoided.
 func assertCondition(t *testing.T, from conditions.Getter, condition *clusterv1.Condition) {
+	t.Helper()
+
 	g := NewWithT(t)
 	g.Expect(conditions.Has(from, condition.Type)).To(BeTrue())
 

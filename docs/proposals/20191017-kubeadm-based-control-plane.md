@@ -75,7 +75,7 @@ status: implementable
 
 ## Glossary
 
-The lexicon used in this document is described in more detail [here](https://github.com/kubernetes-sigs/cluster-api/blob/master/docs/book/src/reference/glossary.md).  Any discrepancies should be rectified in the main Cluster API glossary.
+The lexicon used in this document is described in more detail [here](https://github.com/kubernetes-sigs/cluster-api/blob/main/docs/book/src/reference/glossary.md).  Any discrepancies should be rectified in the main Cluster API glossary.
 
 ### References
 
@@ -131,10 +131,10 @@ Non-Goals listed in this document are intended to scope bound the current v1alph
 - To mutate the configuration of live, running clusters (e.g. changing api-server flags), as this is the responsibility of the [component configuration working group](https://git.k8s.io/community/wg-component-standard).
 - To provide configuration of external cloud providers (i.e. the [cloud-controller-manager](https://kubernetes.io/docs/tasks/administer-cluster/running-cloud-controller/)).This is deferred to kubeadm.
 - To provide CNI configuration. This is deferred to external, higher level tooling.
-- To provide the upgrade logic to handle changes to infrastructure (networks, firewalls etc…) that may need to be done to support a control plane on a newer version of Kubernetes (e.g. a cloud controller manager requires updated permissions against infrastructure APIs). We expect the work on [add-on components](https://git.k8s.io/community/sig-cluster-lifecycle#cluster-addons)) to help to resolve some of these issues.
+- To provide the upgrade logic to handle changes to infrastructure (networks, firewalls etc…) that may need to be done to support a control plane on a newer version of Kubernetes (e.g. a cloud controller manager requires updated permissions against infrastructure APIs). We expect the work on [add-on components](https://git.k8s.io/community/sig-cluster-lifecycle#cluster-addons) to help to resolve some of these issues.
 - To provide automation around the horizontal or vertical scaling of control plane components, especially as etcd places hard performance limits beyond 3 nodes (due to latency).
 - To support upgrades where the infrastructure does not rely on a Load Balancer for access to the API Server.
-- To implement a fully modeled state machine and/or Conditions, a larger effort for Cluster API more broadly is being organized on [this issue](https://github.com/kubernetes-sigs/cluster-api/issues/1658))
+- To implement a fully modeled state machine and/or Conditions, a larger effort for Cluster API more broadly is being organized on [this issue](https://github.com/kubernetes-sigs/cluster-api/issues/1658)
 
 ## Proposal
 
@@ -165,7 +165,7 @@ Non-Goals listed in this document are intended to scope bound the current v1alph
 
 #### New API Types
 
-See [kubeadm_control_plane_types.go](https://github.com/kubernetes-sigs/cluster-api/blob/master/controlplane/kubeadm/api/v1alpha3/kubeadm_control_plane_types.go)
+See [kubeadm_control_plane_types.go](https://github.com/kubernetes-sigs/cluster-api/blob/main/controlplane/kubeadm/api/v1alpha3/kubeadm_control_plane_types.go)
 
 With the following validations:
 
@@ -472,7 +472,7 @@ When `MaxSurge` is set to 0 the rollout algorithm is as follows:
   for additional details. When there are multiple machines that are marked for remediation, the oldest one will be remediated first.
 
 - Following rules should be satisfied in order to start remediation
-  - The cluster MUST have spec.replicas >= 3, because this is the smallest cluster size that allows any etcd failure tolerance.
+  - The cluster MUST have at least two control plane machines, because this is the smallest cluster size that can be remediated.
   - The number of replicas MUST be equal to or greater than the desired replicas. This rule ensures that when the cluster
     is missing replicas, we skip remediation and instead perform regular scale up/rollout operations first.
   - The cluster MUST have no machines with a deletion timestamp. This rule prevents KCP taking actions while the cluster is in a transitional state.
@@ -489,7 +489,7 @@ When `MaxSurge` is set to 0 the rollout algorithm is as follows:
 ###### Why delete and recreate
 
 When replacing a KCP machine the most critical component to be taken into account is etcd, and
-according to the [etcd documentation](https://github.com/etcd-io/etcd/blob/master/Documentation/faq.md#should-i-add-a-member-before-removing-an-unhealthy-member),
+according to the [etcd documentation](https://etcd.io/docs/v3.5/faq/#should-i-add-a-member-before-removing-an-unhealthy-member),
 it's important to remove an unhealthy etcd member first and then add its replacement:
 
 - etcd employs distributed consensus based on a quorum model; (n/2)+1 members, a majority, must agree on a proposal before

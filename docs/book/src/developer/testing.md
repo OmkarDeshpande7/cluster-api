@@ -37,7 +37,21 @@ a fake infrastructure provider to allow test coverage for testing the interactio
 
 ## Running unit and integration tests
 
-Using the `test` target through `make` will run all of the unit and integration tests.
+Run `make test` to execute all unit and integration tests.
+
+<aside class="note">
+
+<h1>Tips</h1>
+
+When testing individual packages, you can speed up the test execution by running the tests with a local kind cluster.
+This avoids spinning up a testenv with each test execution. It also makes it easier to debug, because it's straightforward
+to access a kind cluster with kubectl during test execution. For further instructions, run: `./hack/setup-envtest-with-kind.sh`.
+
+When running individual tests, it could happen that a testenv is started if this is required by the `suite_test.go` file.
+However, if the tests you are running don't require testenv (i.e. they are only using fake client), you can skip the testenv
+creation by setting the environment variable `CAPI_DISABLE_TEST_ENV` (to any non-empty value).
+
+</aside>
 
 ## End-to-end tests
 
@@ -53,14 +67,120 @@ The following guidelines should be followed when developing E2E tests:
 
 See [e2e development] for more information on developing e2e tests for CAPI and external providers.
 
-## Running the end-to-end tests
+## Running the end-to-end tests locally
 
-`make docker-build-e2e` will build the images for all providers that will be needed for the e2e test.
+Usually the e2e tests are executed by Prow, either pre-submit (on PRs) or periodically on certain branches
+(e.g. the default branch). Those jobs are defined in the kubernetes/test-infra repository in [config/jobs/kubernetes-sigs/cluster-api](https://github.com/kubernetes/test-infra/tree/master/config/jobs/kubernetes-sigs/cluster-api).
+For development and debugging those tests can also be executed locally.
+
+### Prerequisites
+
+`make docker-build-e2e` will build the images for all providers that will be needed for the e2e tests.
+
+### Test execution via ci-e2e.sh
+
+To run a test locally via the command line, you should look at the Prow Job configuration for the test you want to run and then execute the same commands locally.
+For example to run [pull-cluster-api-e2e-main](https://github.com/kubernetes/test-infra/blob/49ab08a6a2a17377d52a11212e6f1104c3e87bfc/config/jobs/kubernetes-sigs/cluster-api/cluster-api-presubmits-main.yaml#L113-L140)
+just execute:
+
+```bash
+GINKGO_FOCUS="\[PR-Blocking\]" ./scripts/ci-e2e.sh
+```
+
+### Test execution via make test-e2e
 
 `make test-e2e` will run e2e tests by using whatever provider images already exist on disk.
-After running `make docker-build-e2e` at least once, this can be used for a faster test run if there are no provider code changes.
+After running `make docker-build-e2e` at least once, `make test-e2e` can be used for a faster test run, if there are no 
+provider code changes. If the provider code is changed, run `make docker-build-e2e` to update the images.
 
-Additionally, `test-e2e` target supports the following env variables:
+### Test execution via IDE
+
+It's also possible to run the tests via an IDE which makes it easier to debug the test code by stepping through the code.
+
+First, we have to make sure all prerequisites are fulfilled, i.e. all required images have been built (this also includes 
+kind images). This can be done by executing the `./scripts/ci-e2e.sh` script.
+
+```bash
+# Notes:
+# * You can cancel the script as soon as it starts the actual test execution via `make -C test/e2e/ run`.
+# * If you want to run other tests (e.g. upgrade tests), make sure all required env variables are set (see the Prow Job config). 
+GINKGO_FOCUS="\[PR-Blocking\]" ./scripts/ci-e2e.sh
+
+# Make sure the cluster-templates have been generated.
+make -C test/e2e cluster-templates
+```
+
+Now, the tests can be run in an IDE. The following describes how this can be done in Intellij IDEA and VS Code. It should work
+roughly the same way in all other IDEs. We assume the `cluster-api` repository has been checked
+out into `/home/user/code/src/sigs.k8s.io/cluster-api`.
+
+#### Intellij 
+
+Create a new run configuration and fill in:
+* Test framework: `gotest`
+* Test kind: `Package`
+* Package path: `sigs.k8s.io/cluster-api/test/e2e`
+* Pattern: `^\QTestE2E\E$`
+* Working directory: `/home/user/code/src/sigs.k8s.io/cluster-api/test/e2e`
+* Environment: `ARTIFACTS=/home/user/code/src/sigs.k8s.io/cluster-api/_artifacts`
+* Program arguments: `-e2e.config=/home/user/code/src/sigs.k8s.io/cluster-api/test/e2e/config/docker.yaml -ginkgo.focus="\[PR-Blocking\]"`
+
+#### VS Code
+
+Add the launch.json file in the .vscode folder in your repo:
+```json
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run e2e test",
+            "type": "go",
+            "request": "launch",
+            "mode": "test",
+            "program": "${workspaceRoot}/test/e2e/e2e_suite_test.go",
+            "env": {
+                "ARTIFACTS":"${workspaceRoot}/_artifacts",
+            },
+            "args": [
+                "-e2e.config=${workspaceRoot}/test/e2e/config/docker.yaml",
+                "-ginkgo.focus=\\[PR-Blocking\\]",
+                "-ginkgo.v=true"
+            ],
+            "trace": "verbose",
+            "buildFlags": "-tags 'e2e'",
+            "showGlobalVariables": true
+        }
+    ]
+}
+```
+
+Execute the run configuration with `Debug`.
+
+<aside class="note">
+
+<h1>Tips</h1>
+
+If you want to debug CAPI controller during e2e tests, just scale down the controller in the local kind cluster
+and run it via the IDE.
+
+</aside>
+
+### Running specific tests
+
+To run a subset of tests, a combination of either one or both of `GINKGO_FOCUS` and `GINKGO_SKIP` env variables can be set.
+Each of these can be used to match tests, for example:
+- `[PR-Blocking]` => Sanity tests run before each PR merge
+- `[K8s-Upgrade]` => Tests which verify k8s component version upgrades on workload clusters
+- `[Conformance]` => Tests which run the k8s conformance suite on workload clusters
+- `When testing KCP.*` => Tests which start with `When testing KCP`
+
+For example:
+` GINKGO_FOCUS="\\[PR-Blocking\\]" make test-e2e ` can be used to run the sanity E2E tests
+` GINKGO_SKIP="\\[K8s-Upgrade\\]" make test-e2e ` can be used to skip the upgrade E2E tests
+
+### Further customization
+
+The following env variables can be set to customize the test execution:
 
 - `GINKGO_FOCUS` to set ginkgo focus (default empty - all tests)
 - `GINKGO_SKIP` to set ginkgo skip (default empty - to allow running all tests)
@@ -71,17 +191,7 @@ Additionally, `test-e2e` target supports the following env variables:
 - `USE_EXISTING_CLUSTER` to use an existing management cluster instead of creating a new one for each test run (default to false)
 - `GINKGO_NOCOLOR` to turn off the ginkgo colored output (default to false)
 
-### Running specific tests
-
-To run a subset of tests, a combination of either one or both of `GINKGO_FOCUS` and `GINKGO_SKIP` env variables can be set.
-Each of these can be set to one of the following values:
-- `[PR-Blocking]` => Sanity tests run before each PR merge
-- `[K8s-Upgrade]` => Tests which verify k8s component version upgrades on workload clusters
-- `[Conformance]` => Tests which run the k8s conformance suite on workload clusters
-
-For example:
-` GINKGO_FOCUS="\\[PR-Blocking\\]" make test-e2e ` can be used to run the sanity E2E tests
-` GINKGO_SKIP="\\[K8s-Upgrade\\]" make test-e2e ` can be used to skip the upgrade E2E tests
+Furthermore, it's possible to overwrite all env variables specified in `variables` in `test/e2e/config/docker.yaml`.
 
 ## Quick reference
 
@@ -91,7 +201,7 @@ For example:
 local instance of etcd and the kube-apiserver. This allows tests to be executed in an environment very similar to a
 real environment.
 
-Additionally, in Cluster API there is a set of utilities under [test/helpers] that helps developers in setting up
+Additionally, in Cluster API there is a set of utilities under [internal/envtest] that helps developers in setting up
 a [envtest] ready for Cluster API testing, and more specifically:
 
 - With the required CRDs already pre-configured.
@@ -103,30 +213,32 @@ by convention, this code should be in a file named `suite_test.go`:
 
 ```golang
 var (
-	testEnv *helpers.TestEnvironment
-	ctx     = context.Background()
+	env *envtest.Environment
+	ctx = ctrl.SetupSignalHandler()
 )
 
 func TestMain(m *testing.M) {
-	// Bootstrapping test environment
-	testEnv = helpers.NewTestEnvironment()
-	go func() {
-		if err := testEnv.StartManager(); err != nil {
-			panic(fmt.Sprintf("Failed to start the envtest manager: %v", err))
+	setupIndexes := func(ctx context.Context, mgr ctrl.Manager) {
+		if err := index.AddDefaultIndexes(ctx, mgr); err != nil {
+			panic(fmt.Sprintf("unable to setup index: %v", err))
 		}
-	}()
-	<-testEnv.Manager.Elected()
-	testEnv.WaitForWebhooks()
-
-	// Run tests
-	code := m.Run()
-	// Tearing down the test environment
-	if err := testEnv.Stop(); err != nil {
-		panic(fmt.Sprintf("Failed to stop the envtest: %v", err))
 	}
 
-	// Report exit code
-	os.Exit(code)
+	setupReconcilers := func(ctx context.Context, mgr ctrl.Manager) {
+		if err := (&MyReconciler{
+			Client:  mgr.GetClient(),
+			Log:     log.NullLogger{},
+		}).SetupWithManager(mgr, controller.Options{MaxConcurrentReconciles: 1}); err != nil {
+			panic(fmt.Sprintf("Failed to start the MyReconciler: %v", err))
+		}
+	}
+
+	os.Exit(envtest.Run(ctx, envtest.RunInput{
+		M:        m,
+		SetupEnv: func(e *envtest.Environment) { env = e },
+		SetupIndexes:     setupIndexes,
+		SetupReconcilers: setupReconcilers,
+	}))
 }
 ```
 
@@ -139,11 +251,13 @@ func TestMain(m *testing.M) {
 	// Bootstrapping test environment
 	...
 
-	if err := (&MyReconciler{
-		Client:  testEnv,
-		Log:     log.NullLogger{},
-	}).SetupWithManager(testEnv.Manager, controller.Options{MaxConcurrentReconciles: 1}); err != nil {
-		panic(fmt.Sprintf("Failed to start the MyReconciler: %v", err))
+	setupReconcilers := func(ctx context.Context, mgr ctrl.Manager) {
+		if err := (&MyReconciler{
+			Client:  mgr.GetClient(),
+			Log:     log.NullLogger{},
+		}).SetupWithManager(mgr, controller.Options{MaxConcurrentReconciles: 1}); err != nil {
+			panic(fmt.Sprintf("Failed to start the MyReconciler: %v", err))
+		}
 	}
 
 	// Run tests
@@ -171,11 +285,11 @@ func TestAFunc(t *testing.T) {
 	g := NewWithT(t)
 	// Generate namespace with a random name starting with ns1; such namespace
 	// will host test objects in isolation from other tests.
-	ns1, err := testEnv.CreateNamespace(ctx, "ns1")
+	ns1, err := env.CreateNamespace(ctx, "ns1")
 	g.Expect(err).ToNot(HaveOccurred())
 	defer func() {
 		// Cleanup the test namespace
-		g.Expect(testEnv.DeleteNamespace(ctx, ns1)).To(Succeed())
+		g.Expect(env.DeleteNamespace(ctx, ns1)).To(Succeed())
 	}()
 
 	obj := &clusterv1.Cluster{
@@ -198,11 +312,11 @@ func TestAFunc(t *testing.T) {
 	g := NewWithT(t)
 	// Generate namespace with a random name starting with ns1; such namespace
 	// will host test objects in isolation from other tests.
-	ns1, err := testEnv.CreateNamespace(ctx, "ns1")
+	ns1, err := env.CreateNamespace(ctx, "ns1")
 	g.Expect(err).ToNot(HaveOccurred())
 	defer func() {
 		// Cleanup the test namespace
-		g.Expect(testEnv.DeleteNamespace(ctx, ns1)).To(Succeed())
+		g.Expect(env.DeleteNamespace(ctx, ns1)).To(Succeed())
 	}()
 
 	obj := &clusterv1.Cluster{
@@ -281,6 +395,8 @@ In Cluster API all the test MUST use [Gomega] assertions.
 
 In Cluster API Unit and integration test MUST use [go test].
 
+[Cluster API quick start]: https://cluster-api.sigs.k8s.io/user/quick-start.html
+[Cluster API test framework]: https://pkg.go.dev/sigs.k8s.io/cluster-api/test/framework?tab=doc
 [e2e development]: ./e2e.md
 [Ginkgo]: http://onsi.github.io/ginkgo/
 [Gomega]: http://onsi.github.io/gomega/
@@ -288,4 +404,4 @@ In Cluster API Unit and integration test MUST use [go test].
 [controller-runtime]: https://github.com/kubernetes-sigs/controller-runtime
 [envtest]: https://github.com/kubernetes-sigs/controller-runtime/tree/master/pkg/envtest
 [fakeclient]: https://github.com/kubernetes-sigs/controller-runtime/tree/master/pkg/client/fake
-[test/helpers]: https://github.com/kubernetes-sigs/cluster-api/tree/master/test/helpers
+[test/helpers]: https://github.com/kubernetes-sigs/cluster-api/tree/main/test/helpers

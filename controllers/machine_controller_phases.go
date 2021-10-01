@@ -28,7 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/pointer"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controllers/external"
 	capierrors "sigs.k8s.io/cluster-api/errors"
 	"sigs.k8s.io/cluster-api/util"
@@ -46,7 +46,7 @@ var (
 )
 
 func (r *MachineReconciler) reconcilePhase(_ context.Context, m *clusterv1.Machine) {
-	originalPhase := m.Status.Phase
+	originalPhase := m.Status.Phase // nolint:ifshort
 
 	// Set the phase to "pending" if nil.
 	if m.Status.Phase == "" {
@@ -58,8 +58,8 @@ func (r *MachineReconciler) reconcilePhase(_ context.Context, m *clusterv1.Machi
 		m.Status.SetTypedPhase(clusterv1.MachinePhaseProvisioning)
 	}
 
-	// Set the phase to "provisioned" if there is a NodeRef.
-	if m.Status.NodeRef != nil {
+	// Set the phase to "provisioned" if there is a provider ID.
+	if m.Spec.ProviderID != nil {
 		m.Status.SetTypedPhase(clusterv1.MachinePhaseProvisioned)
 	}
 
@@ -89,7 +89,7 @@ func (r *MachineReconciler) reconcilePhase(_ context.Context, m *clusterv1.Machi
 func (r *MachineReconciler) reconcileExternal(ctx context.Context, cluster *clusterv1.Cluster, m *clusterv1.Machine, ref *corev1.ObjectReference) (external.ReconcileOutput, error) {
 	log := ctrl.LoggerFrom(ctx, "cluster", cluster.Name)
 
-	if err := utilconversion.ConvertReferenceAPIContract(ctx, r.Client, r.restConfig, ref); err != nil {
+	if err := utilconversion.UpdateReferenceAPIContract(ctx, r.Client, ref); err != nil {
 		return external.ReconcileOutput{}, err
 	}
 

@@ -312,7 +312,7 @@ func TestVersionChecker_ReadFromStateFile(t *testing.T) {
 	g.Expect(err).ToNot(HaveOccurred())
 
 	// override the github client with response to a new version v0.3.99
-	var githubCalled bool = false
+	var githubCalled bool
 	fakeGithubClient2, mux2, cleanup2 := test.NewFakeGitHub()
 	mux2.HandleFunc(
 		"/repos/kubernetes-sigs/cluster-api/releases/latest",
@@ -380,6 +380,7 @@ func generateTempVersionFilePath(g *WithT) (string, func()) {
 	tmpVersionFile := filepath.Join(dir, "clusterctl", "state.yaml")
 
 	return tmpVersionFile, func() {
-		os.RemoveAll(dir)
+		// We don't want to fail if the deletion of the temp file fails, so we ignore the error here
+		_ = os.RemoveAll(dir)
 	}
 }

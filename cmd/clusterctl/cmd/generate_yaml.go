@@ -47,7 +47,7 @@ var generateYamlCmd = &cobra.Command{
 	Example: Examples(`
 		# Generates a configuration file with variable values using
 		a template from a specific URL.
-		clusterctl generate yaml --from https://github.com/foo-org/foo-repository/blob/master/cluster-template.yaml
+		clusterctl generate yaml --from https://github.com/foo-org/foo-repository/blob/main/cluster-template.yaml
 
 		# Generates a configuration file with variable values using
 		a template stored locally.
@@ -83,7 +83,7 @@ func generateYAML(r io.Reader, w io.Writer) error {
 		return err
 	}
 	options := client.ProcessYAMLOptions{
-		ListVariablesOnly: gyOpts.listVariables,
+		SkipTemplateProcess: gyOpts.listVariables,
 	}
 	if gyOpts.url != "" {
 		if gyOpts.url == "-" {

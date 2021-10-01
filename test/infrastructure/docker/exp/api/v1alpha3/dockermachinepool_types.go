@@ -28,8 +28,8 @@ const (
 	MachinePoolFinalizer = "dockermachinepool.infrastructure.cluster.x-k8s.io"
 )
 
-// DockerMachineTemplate defines the desired state of DockerMachine.
-type DockerMachineTemplate struct {
+// DockerMachinePoolMachineTemplate defines the desired state of DockerMachine.
+type DockerMachinePoolMachineTemplate struct {
 	// CustomImage allows customizing the container image that is used for
 	// running the machine
 	// +optional
@@ -50,7 +50,7 @@ type DockerMachineTemplate struct {
 type DockerMachinePoolSpec struct {
 	// Template contains the details used to build a replica machine within the Machine Pool
 	// +optional
-	Template DockerMachineTemplate `json:"template"`
+	Template DockerMachinePoolMachineTemplate `json:"template"`
 
 	// ProviderID is the identification ID of the Machine Pool
 	// +optional
@@ -123,10 +123,12 @@ type DockerMachinePool struct {
 	Status DockerMachinePoolStatus `json:"status,omitempty"`
 }
 
+// GetConditions returns the set of conditions for this object.
 func (c *DockerMachinePool) GetConditions() clusterv1.Conditions {
 	return c.Status.Conditions
 }
 
+// SetConditions sets the conditions on this object.
 func (c *DockerMachinePool) SetConditions(conditions clusterv1.Conditions) {
 	c.Status.Conditions = conditions
 }

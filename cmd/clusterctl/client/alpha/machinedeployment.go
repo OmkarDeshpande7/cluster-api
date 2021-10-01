@@ -17,13 +17,16 @@ limitations under the License.
 package alpha
 
 import (
+	"strconv"
+
 	"github.com/pkg/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	"k8s.io/apimachinery/pkg/runtime"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/client/cluster"
 	logf "sigs.k8s.io/cluster-api/cmd/clusterctl/log"
-	"sigs.k8s.io/cluster-api/controllers/mdutil"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -39,8 +42,8 @@ func getMachineDeployment(proxy cluster.Proxy, name, namespace string) (*cluster
 		Name:      name,
 	}
 	if err := c.Get(ctx, mdObjKey, mdObj); err != nil {
-		return nil, errors.Wrapf(err, "error reading %q %s/%s",
-			mdObj.GroupVersionKind(), mdObjKey.Namespace, mdObjKey.Name)
+		return nil, errors.Wrapf(err, "error reading MachineDeployment %s/%s",
+			mdObjKey.Namespace, mdObjKey.Name)
 	}
 	return mdObj, nil
 }
@@ -57,11 +60,11 @@ func patchMachineDeployemt(proxy cluster.Proxy, name, namespace string, patch cl
 		Name:      name,
 	}
 	if err := cFrom.Get(ctx, mdObjKey, mdObj); err != nil {
-		return errors.Wrapf(err, "error reading %s/%s", mdObj.GetNamespace(), mdObj.GetName())
+		return errors.Wrapf(err, "error reading MachineDeployment %s/%s", mdObj.GetNamespace(), mdObj.GetName())
 	}
 
 	if err := cFrom.Patch(ctx, mdObj, patch); err != nil {
-		return errors.Wrapf(err, "error while patching %s/%s", mdObj.GetNamespace(), mdObj.GetName())
+		return errors.Wrapf(err, "error while patching MachineDeployment %s/%s", mdObj.GetNamespace(), mdObj.GetName())
 	}
 	return nil
 }
@@ -75,7 +78,7 @@ func findMachineDeploymentRevision(toRevision int64, allMSs []*clusterv1.Machine
 		previousRevision   = int64(-1)
 	)
 	for _, ms := range allMSs {
-		if v, err := mdutil.Revision(ms); err == nil {
+		if v, err := revision(ms); err == nil {
 			if toRevision == 0 {
 				if latestRevision < v {
 					// newest one we've seen so far
@@ -95,11 +98,11 @@ func findMachineDeploymentRevision(toRevision int64, allMSs []*clusterv1.Machine
 	}
 
 	if toRevision > 0 {
-		return nil, errors.Errorf("unable to find specified revision: %v", toRevision)
+		return nil, errors.Errorf("unable to find specified MachineDeployment revision: %v", toRevision)
 	}
 
 	if previousMachineSet == nil {
-		return nil, errors.Errorf("no rollout history found")
+		return nil, errors.Errorf("no rollout history found for MachineDeployment")
 	}
 	return previousMachineSet, nil
 }
@@ -146,4 +149,16 @@ func getMachineSetsForDeployment(proxy cluster.Proxy, d *clusterv1.MachineDeploy
 	}
 
 	return filtered, nil
+}
+
+func revision(obj runtime.Object) (int64, error) {
+	acc, err := meta.Accessor(obj)
+	if err != nil {
+		return 0, err
+	}
+	v, ok := acc.GetAnnotations()[clusterv1.RevisionAnnotation]
+	if !ok {
+		return 0, nil
+	}
+	return strconv.ParseInt(v, 10, 64)
 }

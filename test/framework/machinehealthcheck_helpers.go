@@ -27,7 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -38,7 +38,7 @@ type DiscoverMachineHealthCheckAndWaitForRemediationInput struct {
 	WaitForMachineRemediation []interface{}
 }
 
-// DiscoverMachineHealthCheckAndWaitForRemediation patches an unhealthy node condition to one node observed by the Machine Health Check and then wait for remediation.
+// DiscoverMachineHealthChecksAndWaitForRemediation patches an unhealthy node condition to one node observed by the Machine Health Check and then wait for remediation.
 func DiscoverMachineHealthChecksAndWaitForRemediation(ctx context.Context, input DiscoverMachineHealthCheckAndWaitForRemediationInput) {
 	Expect(ctx).NotTo(BeNil(), "ctx is required for DiscoverMachineHealthChecksAndWaitForRemediation")
 	Expect(input.ClusterProxy).ToNot(BeNil(), "Invalid argument. input.ClusterProxy can't be nil when calling DiscoverMachineHealthChecksAndWaitForRemediation")

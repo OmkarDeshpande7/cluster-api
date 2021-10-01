@@ -21,8 +21,9 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
-	kerrors "k8s.io/apimachinery/pkg/api/errors"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	"sigs.k8s.io/cluster-api/util/predicates"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -32,16 +33,18 @@ import (
 // ClusterCacheReconciler is responsible for stopping remote cluster caches when
 // the cluster for the remote cache is being deleted.
 type ClusterCacheReconciler struct {
-	Log     logr.Logger
-	Client  client.Client
-	Tracker *ClusterCacheTracker
+	Log              logr.Logger
+	Client           client.Client
+	Tracker          *ClusterCacheTracker
+	WatchFilterValue string
 }
 
 func (r *ClusterCacheReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, options controller.Options) error {
-	_, err := ctrl.NewControllerManagedBy(mgr).
+	err := ctrl.NewControllerManagedBy(mgr).
 		For(&clusterv1.Cluster{}).
 		WithOptions(options).
-		Build(r)
+		WithEventFilter(predicates.ResourceHasFilterLabel(ctrl.LoggerFrom(ctx), r.WatchFilterValue)).
+		Complete(r)
 
 	if err != nil {
 		return errors.Wrap(err, "failed setting up with a controller manager")
@@ -61,7 +64,7 @@ func (r *ClusterCacheReconciler) Reconcile(ctx context.Context, req reconcile.Re
 	if err == nil {
 		log.V(4).Info("Cluster still exists")
 		return reconcile.Result{}, nil
-	} else if !kerrors.IsNotFound(err) {
+	} else if !apierrors.IsNotFound(err) {
 		log.Error(err, "Error retrieving cluster")
 		return reconcile.Result{}, err
 	}

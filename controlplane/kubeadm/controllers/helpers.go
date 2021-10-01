@@ -28,14 +28,15 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apiserver/pkg/storage/names"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
-	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controllers/external"
-	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha4"
+	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controlplane/kubeadm/internal"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/certs"
 	"sigs.k8s.io/cluster-api/util/conditions"
+	utilconversion "sigs.k8s.io/cluster-api/util/conversion"
 	"sigs.k8s.io/cluster-api/util/kubeconfig"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/cluster-api/util/secret"
@@ -120,12 +121,16 @@ func (r *KubeadmControlPlaneReconciler) adoptKubeconfigSecret(ctx context.Contex
 	return nil
 }
 
-func (r *KubeadmControlPlaneReconciler) reconcileExternalReference(ctx context.Context, cluster *clusterv1.Cluster, ref corev1.ObjectReference) error {
-	if !strings.HasSuffix(ref.Kind, external.TemplateSuffix) {
+func (r *KubeadmControlPlaneReconciler) reconcileExternalReference(ctx context.Context, cluster *clusterv1.Cluster, ref *corev1.ObjectReference) error {
+	if !strings.HasSuffix(ref.Kind, clusterv1.TemplateSuffix) {
 		return nil
 	}
 
-	obj, err := external.Get(ctx, r.Client, &ref, cluster.Namespace)
+	if err := utilconversion.UpdateReferenceAPIContract(ctx, r.Client, ref); err != nil {
+		return err
+	}
+
+	obj, err := external.Get(ctx, r.Client, ref, cluster.Namespace)
 	if err != nil {
 		return err
 	}
@@ -162,11 +167,12 @@ func (r *KubeadmControlPlaneReconciler) cloneConfigsAndGenerateMachine(ctx conte
 	// Clone the infrastructure template
 	infraRef, err := external.CloneTemplate(ctx, &external.CloneTemplateInput{
 		Client:      r.Client,
-		TemplateRef: &kcp.Spec.InfrastructureTemplate,
+		TemplateRef: &kcp.Spec.MachineTemplate.InfrastructureRef,
 		Namespace:   kcp.Namespace,
 		OwnerRef:    infraCloneOwner,
 		ClusterName: cluster.Name,
-		Labels:      internal.ControlPlaneLabelsForCluster(cluster.Name),
+		Labels:      internal.ControlPlaneMachineLabelsForCluster(kcp, cluster.Name),
+		Annotations: kcp.Spec.MachineTemplate.ObjectMeta.Annotations,
 	})
 	if err != nil {
 		// Safe to return early here since no resources have been created yet.
@@ -237,7 +243,8 @@ func (r *KubeadmControlPlaneReconciler) generateKubeadmConfig(ctx context.Contex
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            names.SimpleNameGenerator.GenerateName(kcp.Name + "-"),
 			Namespace:       kcp.Namespace,
-			Labels:          internal.ControlPlaneLabelsForCluster(cluster.Name),
+			Labels:          internal.ControlPlaneMachineLabelsForCluster(kcp, cluster.Name),
+			Annotations:     kcp.Spec.MachineTemplate.ObjectMeta.Annotations,
 			OwnerReferences: []metav1.OwnerReference{owner},
 		},
 		Spec: *spec,
@@ -261,9 +268,10 @@ func (r *KubeadmControlPlaneReconciler) generateKubeadmConfig(ctx context.Contex
 func (r *KubeadmControlPlaneReconciler) generateMachine(ctx context.Context, kcp *controlplanev1.KubeadmControlPlane, cluster *clusterv1.Cluster, infraRef, bootstrapRef *corev1.ObjectReference, failureDomain *string) error {
 	machine := &clusterv1.Machine{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      names.SimpleNameGenerator.GenerateName(kcp.Name + "-"),
-			Namespace: kcp.Namespace,
-			Labels:    internal.ControlPlaneLabelsForCluster(cluster.Name),
+			Name:        names.SimpleNameGenerator.GenerateName(kcp.Name + "-"),
+			Namespace:   kcp.Namespace,
+			Labels:      internal.ControlPlaneMachineLabelsForCluster(kcp, cluster.Name),
+			Annotations: map[string]string{},
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(kcp, controlplanev1.GroupVersion.WithKind("KubeadmControlPlane")),
 			},
@@ -276,7 +284,7 @@ func (r *KubeadmControlPlaneReconciler) generateMachine(ctx context.Context, kcp
 				ConfigRef: bootstrapRef,
 			},
 			FailureDomain:    failureDomain,
-			NodeDrainTimeout: kcp.Spec.NodeDrainTimeout,
+			NodeDrainTimeout: kcp.Spec.MachineTemplate.NodeDrainTimeout,
 		},
 	}
 
@@ -286,7 +294,13 @@ func (r *KubeadmControlPlaneReconciler) generateMachine(ctx context.Context, kcp
 	if err != nil {
 		return errors.Wrap(err, "failed to marshal cluster configuration")
 	}
-	machine.SetAnnotations(map[string]string{controlplanev1.KubeadmClusterConfigurationAnnotation: string(clusterConfig)})
+
+	// Add the annotations from the MachineTemplate.
+	// Note: we intentionally don't use the map directly to ensure we don't modify the map in KCP.
+	for k, v := range kcp.Spec.MachineTemplate.ObjectMeta.Annotations {
+		machine.Annotations[k] = v
+	}
+	machine.Annotations[controlplanev1.KubeadmClusterConfigurationAnnotation] = string(clusterConfig)
 
 	if err := r.Client.Create(ctx, machine); err != nil {
 		return errors.Wrap(err, "failed to create machine")

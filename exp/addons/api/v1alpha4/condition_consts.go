@@ -16,7 +16,7 @@ limitations under the License.
 
 package v1alpha4
 
-import clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+import clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 
 // Conditions and condition Reasons for the ClusterResourceSet object
 
@@ -37,6 +37,6 @@ const (
 	// RetrievingResourceFailedReason (Severity=Warning) documents at least one of the resources are not successfully retrieved.
 	RetrievingResourceFailedReason = "RetrievingResourceFailed"
 
-	// WrongSecretType (Severity=Warning) documents at least one of the Secret's type in the resource list is not supported.
+	// WrongSecretTypeReason (Severity=Warning) documents at least one of the Secret's type in the resource list is not supported.
 	WrongSecretTypeReason = "WrongSecretType"
 )

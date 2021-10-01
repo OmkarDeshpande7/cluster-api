@@ -25,7 +25,7 @@ import (
 
 const (
 	// MachinePoolFinalizer is used to ensure deletion of dependencies (nodes, infra).
-	MachinePoolFinalizer = "machinepool.exp.cluster.x-k8s.io"
+	MachinePoolFinalizer = "machinepool.cluster.x-k8s.io"
 )
 
 // ANCHOR: MachinePoolSpec
@@ -201,7 +201,7 @@ func (m *MachinePoolStatus) GetTypedPhase() MachinePoolPhase {
 // +kubebuilder:resource:path=machinepools,shortName=mp,scope=Namespaced,categories=cluster-api
 // +kubebuilder:subresource:status
 // +kubebuilder:subresource:scale:specpath=.spec.replicas,statuspath=.status.replicas
-// +kubebuilder:storageversion
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Time duration since creation of MachinePool"
 // +kubebuilder:printcolumn:name="Replicas",type="string",JSONPath=".status.replicas",description="MachinePool replicas count"
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase",description="MachinePool status such as Terminating/Pending/Provisioning/Running/Failed etc"
 // +kubebuilder:printcolumn:name="Version",type="string",JSONPath=".spec.template.spec.version",description="Kubernetes version associated with this MachinePool"
@@ -216,10 +216,12 @@ type MachinePool struct {
 	Status MachinePoolStatus `json:"status,omitempty"`
 }
 
+// GetConditions returns the set of conditions for this object.
 func (m *MachinePool) GetConditions() clusterv1.Conditions {
 	return m.Status.Conditions
 }
 
+// SetConditions sets the conditions on this object.
 func (m *MachinePool) SetConditions(conditions clusterv1.Conditions) {
 	m.Status.Conditions = conditions
 }

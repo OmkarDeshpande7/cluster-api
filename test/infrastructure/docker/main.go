@@ -31,18 +31,21 @@ import (
 	cliflag "k8s.io/component-base/cli/flag"
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
-	expv1 "sigs.k8s.io/cluster-api/exp/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	"sigs.k8s.io/cluster-api/controllers/remote"
+	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api/feature"
-	infrav1old "sigs.k8s.io/cluster-api/test/infrastructure/docker/api/v1alpha3"
-	infrav1 "sigs.k8s.io/cluster-api/test/infrastructure/docker/api/v1alpha4"
-	"sigs.k8s.io/cluster-api/test/infrastructure/docker/controllers"
-	infraexpv1old "sigs.k8s.io/cluster-api/test/infrastructure/docker/exp/api/v1alpha3"
-	infraexpv1 "sigs.k8s.io/cluster-api/test/infrastructure/docker/exp/api/v1alpha4"
-	expcontrollers "sigs.k8s.io/cluster-api/test/infrastructure/docker/exp/controllers"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/healthz"
+
+	infrav1alpha3 "sigs.k8s.io/cluster-api/test/infrastructure/docker/api/v1alpha3"
+	infrav1alpha4 "sigs.k8s.io/cluster-api/test/infrastructure/docker/api/v1alpha4"
+	infrav1 "sigs.k8s.io/cluster-api/test/infrastructure/docker/api/v1beta1"
+	"sigs.k8s.io/cluster-api/test/infrastructure/docker/controllers"
+	infraexpv1alpha3 "sigs.k8s.io/cluster-api/test/infrastructure/docker/exp/api/v1alpha3"
+	infraexpv1alpha4 "sigs.k8s.io/cluster-api/test/infrastructure/docker/exp/api/v1alpha4"
+	infraexpv1 "sigs.k8s.io/cluster-api/test/infrastructure/docker/exp/api/v1beta1"
+	expcontrollers "sigs.k8s.io/cluster-api/test/infrastructure/docker/exp/controllers"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -50,7 +53,7 @@ var (
 	myscheme = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
 
-	//flags.
+	// flags.
 	metricsBindAddr      string
 	enableLeaderElection bool
 	syncPeriod           time.Duration
@@ -64,9 +67,11 @@ func init() {
 	klog.InitFlags(nil)
 
 	_ = scheme.AddToScheme(myscheme)
-	_ = infrav1old.AddToScheme(myscheme)
+	_ = infrav1alpha3.AddToScheme(myscheme)
+	_ = infrav1alpha4.AddToScheme(myscheme)
 	_ = infrav1.AddToScheme(myscheme)
-	_ = infraexpv1old.AddToScheme(myscheme)
+	_ = infraexpv1alpha3.AddToScheme(myscheme)
+	_ = infraexpv1alpha4.AddToScheme(myscheme)
 	_ = infraexpv1.AddToScheme(myscheme)
 	_ = clusterv1.AddToScheme(myscheme)
 	_ = expv1.AddToScheme(myscheme)
@@ -74,7 +79,7 @@ func init() {
 }
 
 func initFlags(fs *pflag.FlagSet) {
-	fs.StringVar(&metricsBindAddr, "metrics-bind-addr", ":8080",
+	fs.StringVar(&metricsBindAddr, "metrics-bind-addr", "localhost:8080",
 		"The address the metric endpoint binds to.")
 	fs.IntVar(&concurrency, "concurrency", 10,
 		"The number of docker machines to process simultaneously")
@@ -102,7 +107,9 @@ func main() {
 
 	ctrl.SetLogger(klogr.New())
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	restConfig := ctrl.GetConfigOrDie()
+	restConfig.UserAgent = remote.DefaultClusterAPIUserAgent("cluster-api-docker-controller-manager")
+	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme:                 myscheme,
 		MetricsBindAddress:     metricsBindAddr,
 		LeaderElection:         enableLeaderElection,
@@ -133,12 +140,12 @@ func main() {
 }
 
 func setupChecks(mgr ctrl.Manager) {
-	if err := mgr.AddReadyzCheck("ping", healthz.Ping); err != nil {
+	if err := mgr.AddReadyzCheck("webhook", mgr.GetWebhookServer().StartedChecker()); err != nil {
 		setupLog.Error(err, "unable to create ready check")
 		os.Exit(1)
 	}
 
-	if err := mgr.AddHealthzCheck("ping", healthz.Ping); err != nil {
+	if err := mgr.AddHealthzCheck("webhook", mgr.GetWebhookServer().StartedChecker()); err != nil {
 		setupLog.Error(err, "unable to create health check")
 		os.Exit(1)
 	}
@@ -157,7 +164,7 @@ func setupReconcilers(ctx context.Context, mgr ctrl.Manager) {
 	if err := (&controllers.DockerClusterReconciler{
 		Client: mgr.GetClient(),
 		Log:    ctrl.Log.WithName("controllers").WithName("DockerCluster"),
-	}).SetupWithManager(mgr); err != nil {
+	}).SetupWithManager(mgr, controller.Options{}); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "DockerCluster")
 		os.Exit(1)
 	}
@@ -179,5 +186,22 @@ func setupWebhooks(mgr ctrl.Manager) {
 	if err := (&infrav1.DockerMachineTemplate{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "DockerMachineTemplate")
 		os.Exit(1)
+	}
+
+	if err := (&infrav1.DockerCluster{}).SetupWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "DockerCluster")
+		os.Exit(1)
+	}
+
+	if err := (&infrav1.DockerClusterTemplate{}).SetupWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "DockerClusterTemplate")
+		os.Exit(1)
+	}
+
+	if feature.Gates.Enabled(feature.MachinePool) {
+		if err := (&infraexpv1.DockerMachinePool{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "DockerMachinePool")
+			os.Exit(1)
+		}
 	}
 }

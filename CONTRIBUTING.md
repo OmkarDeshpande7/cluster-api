@@ -57,6 +57,32 @@ All changes must be code reviewed. Coding conventions and standards are explaine
 docs](https://git.k8s.io/community/contributors/devel). Expect reviewers to request that you
 avoid common [go style mistakes](https://github.com/golang/go/wiki/CodeReviewComments) in your PRs.
 
+## Documentation changes
+
+The documentation is published in form of a book at:
+
+- [Current stable release](https://cluster-api.sigs.k8s.io)
+- [Tip of the main branch](https://main.cluster-api.sigs.k8s.io/)
+- [v1alpha4 release branch](https://release-0-4.cluster-api.sigs.k8s.io/)
+- [v1alpha3 release branch](https://release-0-3.cluster-api.sigs.k8s.io/)
+- [v1alpha2 release branch](https://release-0-2.cluster-api.sigs.k8s.io/)
+
+The source for the book is [this folder](https://github.com/kubernetes-sigs/cluster-api/tree/main/docs/book/src)
+containing markdown files and we use [mdBook][] to build it into a static
+website.
+
+After making changes locally you can run `make serve-book` which will build the HTML version
+and start a web server so you can preview if the changes render correctly at
+http://localhost:3000; the preview auto-updates when changes are detected.
+
+Note: you don't need to have [mdBook][] installed, `make serve-book` will ensure
+appropriate binaries for mdBook and any used plugins are downloaded into
+`hack/tools/bin/` directory.
+
+When submitting the PR remember to label it with the 📖 (:book:) icon.
+
+[mdBook]: https://github.com/rust-lang/mdBook
+
 ## Releases
 
 Cluster API uses [GitHub milestones](https://github.com/kubernetes-sigs/cluster-api/milestones) to track releases.
@@ -81,7 +107,7 @@ Cluster API uses [GitHub milestones](https://github.com/kubernetes-sigs/cluster-
 
 The Cluster API Enhacement Proposal is the process this project uses to adopt new features, changes to the APIs, changes to contracts between components, or changes to CLI interfaces.
 
-The [template](https://github.com/kubernetes-sigs/cluster-api/blob/master/docs/proposals/YYYYMMDD-template.md), and accepted proposals live under [docs/proposals](https://github.com/kubernetes-sigs/cluster-api/tree/master/docs/proposals).
+The [template](https://github.com/kubernetes-sigs/cluster-api/blob/main/docs/proposals/YYYYMMDD-template.md), and accepted proposals live under [docs/proposals](https://github.com/kubernetes-sigs/cluster-api/tree/main/docs/proposals).
 
 - Proposals or requests for enhacements (RFEs) MUST be associated with an issue.
   - Issues can be placed on the roadmap during planning if there is one or more folks
@@ -112,7 +138,9 @@ The artifact folder contains:
     - Dump of the Cluster API resources (only if the cluster is a management cluster).
     - Machine logs (only if the cluster is a workload cluster)
 
-In case you want to run E2E test locally, please refer to the [Testing](https://cluster-api.sigs.k8s.io/developer/testing.html#running-the-end-to-end-tests) guide.
+In case you want to run E2E test locally, please refer to the [Testing](https://cluster-api.sigs.k8s.io/developer/testing.html#running-unit-and-integration-tests) guide. An overview over our e2e test jobs (and also all our other jobs) can be found in [Jobs](https://cluster-api.sigs.k8s.io/reference/jobs.html).
+
+
 
 ## Reviewing a Patch
 
@@ -204,10 +232,10 @@ Proof of concepts, code experiments, or other initiatives can live under the `ex
 
 ## Breaking Changes
 
-Breaking changes are generally allowed in the `master` branch, as this is the branch used to develop the next minor
+Breaking changes are generally allowed in the `main` branch, as this is the branch used to develop the next minor
 release of Cluster API.
 
-There may be times, however, when `master` is closed for breaking changes. This is likely to happen as we near the
+There may be times, however, when `main` is closed for breaking changes. This is likely to happen as we near the
 release of a new minor version.
 
 Breaking changes are not allowed in release branches, as these represent minor versions that have already been released.
@@ -226,6 +254,76 @@ Examples of breaking changes include:
 There may, at times, need to be exceptions where breaking changes are allowed in release branches. These are at the
 discretion of the project's maintainers, and must be carefully considered before merging. An example of an allowed
 breaking change might be a fix for a behavioral bug that was released in an initial minor version (such as `v0.3.0`).
+
+
+## API conventions
+
+This project follows the [Kubernetes API conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md). Minor modifications or additions to the conventions are listed below.
+
+### Optional vs. Required
+
+* Status fields MUST be optional. Our controllers are patching selected fields instead of updating the entire status in every reconciliation.
+
+* If a field is required (for our controllers to work) and has a default value specified via OpenAPI schema, but we don't want to force users to set the field, we have to mark the field as optional. Otherwise, the client-side kubectl OpenAPI schema validation will force the user to set it even though it would be defaulted on the server-side.
+
+Optional fields have the following properties:
+* An optional field MUST be marked with `+optional` and include an `omitempty` JSON tag.
+* Fields SHOULD be pointers if the nil and the zero values (by Go standards) have semantic differences.
+  * Note: This doesn't apply to map or slice types as they are assignable to `nil`.
+
+#### Example
+ 
+When using ClusterClass, the semantic difference is important when you have a field in a template which will
+have instance-specific different values in derived objects. Because in this case it's possible to set the field to `nil`
+in the template and then the value can be set in derived objects without being overwritten by the cluster topology controller.
+
+#### Exceptions
+
+* Fields in root objects should be kept as scaffolded by kubebuilder, e.g.:
+  ```golang
+  type Machine struct {
+    metav1.TypeMeta   `json:",inline"`
+    metav1.ObjectMeta `json:"metadata,omitempty"`
+
+    Spec   MachineSpec   `json:"spec,omitempty"`
+    Status MachineStatus `json:"status,omitempty"`
+  }
+  type MachineList struct {
+    metav1.TypeMeta `json:",inline"`
+    metav1.ListMeta `json:"metadata,omitempty"`
+    Items           []Machine `json:"items"`
+  }
+  ```
+
+* Top-level fields in `status` must always have the `+optional` annotation. If we want the field to be always visible even if it 
+  has the zero value, it must **not** have the `omitempty` JSON tag, e.g.:
+  * Replica counters like `availableReplicas` in the `MachineDeployment`
+  * Flags expressing progress in the object lifecycle like `infrastructureReady` in `Machine`
+
+### CRD additionalPrinterColumns
+
+All our CRD objects should have the following `additionalPrinterColumns` order (if the respective field exists in the CRD):
+* Namespace (added automatically)
+* Name (added automatically)
+* Cluster
+* Other fields
+* Replica-related fields
+* Phase
+* Age (mandatory field for all CRDs)
+* Version
+* Other fields for -o wide (fields with priority `1` are only shown with `-o wide` and not per default)
+
+***NOTE***: The columns can be configured via the `kubebuilder:printcolumn` annotation on root objects. For examples, please see the `./api` package.
+
+Examples:
+```bash
+$ kubectl get kubeadmcontrolplane
+NAMESPACE            NAME                               INITIALIZED   API SERVER AVAILABLE   REPLICAS   READY   UPDATED   UNAVAILABLE   AGE     VERSION
+quick-start-d5ufye   quick-start-ntysk0-control-plane   true          true                   1          1       1                       2m44s   v1.22.0
+$ kubectl get machinedeployment
+NAMESPACE            NAME                      CLUSTER              REPLICAS   READY   UPDATED   UNAVAILABLE   PHASE       AGE     VERSION
+quick-start-d5ufye   quick-start-ntysk0-md-0   quick-start-ntysk0   1                  1         1             ScalingUp   3m28s   v1.22.0
+```
 
 ## Google Doc Viewing Permissions
 

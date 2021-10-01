@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package proxy implements kubeadm proxy functionality.
 package proxy
 
 import (
@@ -50,7 +51,7 @@ func (a Addr) String() string {
 }
 
 // NewAddrFromConn creates an Addr from the given connection.
-func NewAddrFromConn(c Conn) Addr {
+func NewAddrFromConn(c *Conn) Addr {
 	return Addr{
 		port:       c.stream.Headers().Get(corev1.PortHeader),
 		identifier: c.stream.Identifier(),

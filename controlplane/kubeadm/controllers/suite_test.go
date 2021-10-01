@@ -17,53 +17,43 @@ limitations under the License.
 package controllers
 
 import (
-	"fmt"
 	"os"
 	"testing"
 
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
-
-	"sigs.k8s.io/cluster-api/test/helpers"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/cluster-api/internal/envtest"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/envtest/printer"
 	// +kubebuilder:scaffold:imports
 )
 
-// These tests use Ginkgo (BDD-style Go testing framework). Refer to
-// http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
-
 var (
-	testEnv *helpers.TestEnvironment
-	ctx     = ctrl.SetupSignalHandler()
+	env *envtest.Environment
+	ctx = ctrl.SetupSignalHandler()
+	// TODO(sbueringer): move under internal/builder (or refactor it in a way that we don't need it anymore).
+	fakeGenericMachineTemplateCRD = &apiextensionsv1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: apiextensionsv1.SchemeGroupVersion.String(),
+			Kind:       "CustomResourceDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "genericmachinetemplate.generic.io",
+			Labels: map[string]string{
+				"cluster.x-k8s.io/v1beta1": "v1",
+			},
+		},
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Group: "generic.io",
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				Kind: "GenericMachineTemplate",
+			},
+		},
+	}
 )
 
-func TestAPIs(t *testing.T) {
-	RegisterFailHandler(Fail)
-
-	RunSpecsWithDefaultAndCustomReporters(t,
-		"Controller Suite",
-		[]Reporter{printer.NewlineReporter{}})
-}
-
 func TestMain(m *testing.M) {
-	// Bootstrapping test environment
-	testEnv = helpers.NewTestEnvironment()
-	go func() {
-		if err := testEnv.StartManager(ctx); err != nil {
-			panic(fmt.Sprintf("Failed to start the envtest manager: %v", err))
-		}
-	}()
-	<-testEnv.Manager.Elected()
-	testEnv.WaitForWebhooks()
-
-	// Run tests
-	code := m.Run()
-	// Tearing down the test environment
-	if err := testEnv.Stop(); err != nil {
-		panic(fmt.Sprintf("Failed to stop the envtest: %v", err))
-	}
-
-	// Report exit code
-	os.Exit(code)
+	os.Exit(envtest.Run(ctx, envtest.RunInput{
+		M:        m,
+		SetupEnv: func(e *envtest.Environment) { env = e },
+	}))
 }

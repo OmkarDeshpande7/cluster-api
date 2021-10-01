@@ -21,13 +21,13 @@ import (
 	"testing"
 
 	. "github.com/onsi/gomega"
-
+	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 )
 
 const validCluster = `
-apiVersion: "cluster.x-k8s.io/v1alpha4"
+apiVersion: "cluster.x-k8s.io/v1beta1"
 kind: Cluster
 metadata:
   name: cluster1
@@ -35,39 +35,39 @@ spec:`
 
 const validMachines1 = `
 ---
-apiVersion: "cluster.x-k8s.io/v1alpha4"
+apiVersion: "cluster.x-k8s.io/v1beta1"
 kind: Machine
 metadata:
   name: machine1
 ---
-apiVersion: "cluster.x-k8s.io/v1alpha4"
+apiVersion: "cluster.x-k8s.io/v1beta1"
 kind: Machine
 metadata:
   name: machine2`
 
 const validUnified1 = `
-apiVersion: "cluster.x-k8s.io/v1alpha4"
+apiVersion: "cluster.x-k8s.io/v1beta1"
 kind: Cluster
 metadata:
   name: cluster1
 ---
-apiVersion: "cluster.x-k8s.io/v1alpha4"
+apiVersion: "cluster.x-k8s.io/v1beta1"
 kind: Machine
 metadata:
   name: machine1`
 
 const validUnified2 = `
-apiVersion: "cluster.x-k8s.io/v1alpha4"
+apiVersion: "cluster.x-k8s.io/v1beta1"
 kind: Cluster
 metadata:
   name: cluster1
 ---
-apiVersion: "cluster.x-k8s.io/v1alpha4"
+apiVersion: "cluster.x-k8s.io/v1beta1"
 kind: Machine
 metadata:
   name: machine1
 ---
-apiVersion: "cluster.x-k8s.io/v1alpha4"
+apiVersion: "cluster.x-k8s.io/v1beta1"
 kind: Machine
 metadata:
   name: machine2`
@@ -84,24 +84,24 @@ metadata:
   name: cluster-api-shared-configuration
   namespace: cluster-api-test
 ---
-apiVersion: "cluster.x-k8s.io/v1alpha4"
+apiVersion: "cluster.x-k8s.io/v1beta1"
 kind: Cluster
 metadata:
   name: cluster1
 ---
-apiVersion: "cluster.x-k8s.io/v1alpha4"
+apiVersion: "cluster.x-k8s.io/v1beta1"
 kind: Machine
 metadata:
   name: machine1
 ---
-apiVersion: "cluster.x-k8s.io/v1alpha4"
+apiVersion: "cluster.x-k8s.io/v1beta1"
 kind: Machine
 metadata:
   name: machine2`
 
 const invalidMachines1 = `
 items:
-- apiVersion: "cluster.x-k8s.io/v1alpha4"
+- apiVersion: "cluster.x-k8s.io/v1beta1"
   kind: Machine
   metadata:
     name: machine1
@@ -128,12 +128,12 @@ metadata:
   name: cluster-api-shared-configuration
   namespace: cluster-api-test
 ---
-apiVersion: "cluster.x-k8s.io/v1alpha4"
+apiVersion: "cluster.x-k8s.io/v1beta1"
 kind: Cluster
 metadata:
   name: cluster1
 ---
-apiVersion: "cluster.x-k8s.io/v1alpha4"
+apiVersion: "cluster.x-k8s.io/v1beta1"
 kind: Machine
 - metadata:
     name: machine1
@@ -154,7 +154,7 @@ metadata:
   name: cluster-api-shared-configuration
   namespace: cluster-api-test
 ---
-apiVersion: "cluster.x-k8s.io/v1alpha4"
+apiVersion: "cluster.x-k8s.io/v1beta1"
 kind: Cluster
 metadata:
   name: cluster1
@@ -305,7 +305,7 @@ func TestParseMachineYaml(t *testing.T) {
 func createTempFile(contents string) (filename string, reterr error) {
 	f, err := os.CreateTemp("", "")
 	if err != nil {
-		return "", err
+		return "", errors.Wrap(err, "failed to create temporary file")
 	}
 	defer func() {
 		if err := f.Close(); err != nil {
@@ -351,7 +351,7 @@ func TestToUnstructured(t *testing.T) {
 		{
 			name: "empty object are dropped",
 			args: args{
-				rawyaml: []byte("---\n" + //empty objects before
+				rawyaml: []byte("---\n" + // empty objects before
 					"---\n" +
 					"---\n" +
 					"apiVersion: v1\n" +
@@ -361,7 +361,7 @@ func TestToUnstructured(t *testing.T) {
 					"---\n" +
 					"apiVersion: v1\n" +
 					"kind: Secret\n" +
-					"---\n" + //empty objects after
+					"---\n" + // empty objects after
 					"---\n" +
 					"---\n"),
 			},
@@ -465,4 +465,18 @@ func TestFromUnstructured(t *testing.T) {
 	g := NewWithT(t)
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(string(rawyaml)).To(Equal(string(convertedyaml)))
+}
+
+func TestRaw(t *testing.T) {
+	g := NewWithT(t)
+
+	input := `
+		apiVersion:v1
+		kind:newKind
+		spec:
+			param: abc
+	`
+	output := "apiVersion:v1\nkind:newKind\nspec:\n\tparam: abc\n"
+	result := Raw(input)
+	g.Expect(result).To(Equal(output))
 }

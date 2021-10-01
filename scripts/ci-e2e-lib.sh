@@ -43,6 +43,13 @@ capi:buildDockerImages () {
 # k8s::prepareKindestImages checks all the e2e test variables representing a Kubernetes version,
 # and makes sure a corresponding kindest/node image is available locally.
 k8s::prepareKindestImages() {
+  if [ -n "${KUBERNETES_VERSION_MANAGEMENT:-}" ]; then
+    k8s::resolveVersion "KUBERNETES_VERSION_MANAGEMENT" "$KUBERNETES_VERSION_MANAGEMENT"
+    export KUBERNETES_VERSION_MANAGEMENT=$resolveVersion
+
+    kind::prepareKindestImage "$resolveVersion"
+  fi
+
   if [ -n "${KUBERNETES_VERSION:-}" ]; then
     k8s::resolveVersion "KUBERNETES_VERSION" "$KUBERNETES_VERSION"
     export KUBERNETES_VERSION=$resolveVersion
@@ -87,9 +94,9 @@ k8s::resolveVersion() {
   fi
 
   if [[ "$version" =~ ^ci/ ]]; then
-    resolveVersion=$(curl -LsS "http://gcsweb.k8s.io/gcs/kubernetes-release-dev/ci/${version#ci/}.txt")
+    resolveVersion=$(curl -LsS "http://dl.k8s.io/ci/${version#ci/}.txt")
   else
-    resolveVersion=$(curl -LsS "http://gcsweb.k8s.io/gcs/kubernetes-release/release/${version}.txt")
+    resolveVersion=$(curl -LsS "http://dl.k8s.io/release/${version}.txt")
   fi
   echo "+ $variableName=\"$version\" resolved to \"$resolveVersion\""
 }
@@ -127,7 +134,7 @@ kind::buildNodeImage() {
   # build the node image
   version="${version//+/_}"
   echo "+ Building kindest/node:$version"
-  kind build node-image --type docker --image "kindest/node:$version"
+  kind build node-image --image "kindest/node:$version"
 
   # move back to Cluster API
   cd "$REPO_ROOT" || exit
@@ -146,7 +153,7 @@ k8s::checkoutBranch() {
     # should be already been tagged.
     echo "+ checkout tag $version"
     git fetch --all --tags
-    git checkout "tags/$version" -b "$version-branch"
+    git checkout "tags/$version" -B "$version-branch"
   else
     # otherwise we are requiring a Kubernetes version that should be built from HEAD
     # of one of the existing branches
@@ -163,9 +170,10 @@ k8s::checkoutBranch() {
     if [[ "$releaseBranch" != "" ]]; then
       # if there is already a release branch for the required Kubernetes branch, use it
       echo "+ checkout $releaseBranch branch"
-      git checkout "$releaseBranch" -b "release-$major.$minor"
+      git checkout "$releaseBranch" -B "release-$major.$minor"
     else
-      # otherwise, we should build from master, which is the branch for the next release
+      # otherwise, we should build from the main branch, which is the branch for the next release
+      # TODO(sbueringer) we can only change this to main after k/k has migrated to main
       echo "+ checkout master branch"
       git checkout master
     fi
@@ -198,9 +206,9 @@ EOL
 # the actual test run less sensible to the network speed.
 kind:prepullAdditionalImages () {
   # Pulling cert manager images so we can pre-load in kind nodes
-  kind::prepullImage "quay.io/jetstack/cert-manager-cainjector:v1.1.0"
-  kind::prepullImage "quay.io/jetstack/cert-manager-webhook:v1.1.0"
-  kind::prepullImage "quay.io/jetstack/cert-manager-controller:v1.1.0"
+  kind::prepullImage "quay.io/jetstack/cert-manager-cainjector:v1.5.3"
+  kind::prepullImage "quay.io/jetstack/cert-manager-webhook:v1.5.3"
+  kind::prepullImage "quay.io/jetstack/cert-manager-controller:v1.5.3"
 }
 
 # kind:prepullImage pre-pull a docker image if no already present locally.

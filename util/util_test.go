@@ -27,16 +27,12 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	"k8s.io/client-go/kubernetes/scheme"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-)
-
-var (
-	ctx = ctrl.SetupSignalHandler()
 )
 
 func TestMachineToInfrastructureMapFunc(t *testing.T) {
@@ -57,12 +53,12 @@ func TestMachineToInfrastructureMapFunc(t *testing.T) {
 			},
 			request: &clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 					Name:      "test-1",
 				},
 				Spec: clusterv1.MachineSpec{
 					InfrastructureRef: corev1.ObjectReference{
-						APIVersion: "foo.cluster.x-k8s.io/v1alpha4",
+						APIVersion: "foo.cluster.x-k8s.io/v1beta1",
 						Kind:       "TestMachine",
 						Name:       "infra-1",
 					},
@@ -71,7 +67,7 @@ func TestMachineToInfrastructureMapFunc(t *testing.T) {
 			output: []reconcile.Request{
 				{
 					NamespacedName: client.ObjectKey{
-						Namespace: "default",
+						Namespace: metav1.NamespaceDefault,
 						Name:      "infra-1",
 					},
 				},
@@ -81,17 +77,17 @@ func TestMachineToInfrastructureMapFunc(t *testing.T) {
 			name: "should return no matching reconcile requests",
 			input: schema.GroupVersionKind{
 				Group:   "foo.cluster.x-k8s.io",
-				Version: "v1alpha4",
+				Version: "v1beta1",
 				Kind:    "TestMachine",
 			},
 			request: &clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 					Name:      "test-1",
 				},
 				Spec: clusterv1.MachineSpec{
 					InfrastructureRef: corev1.ObjectReference{
-						APIVersion: "bar.cluster.x-k8s.io/v1alpha4",
+						APIVersion: "bar.cluster.x-k8s.io/v1beta1",
 						Kind:       "TestMachine",
 						Name:       "bar-1",
 					},
@@ -128,12 +124,12 @@ func TestClusterToInfrastructureMapFunc(t *testing.T) {
 			},
 			request: &clusterv1.Cluster{
 				ObjectMeta: metav1.ObjectMeta{
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 					Name:      "test-1",
 				},
 				Spec: clusterv1.ClusterSpec{
 					InfrastructureRef: &corev1.ObjectReference{
-						APIVersion: "foo.cluster.x-k8s.io/v1alpha4",
+						APIVersion: "foo.cluster.x-k8s.io/v1beta1",
 						Kind:       "TestCluster",
 						Name:       "infra-1",
 					},
@@ -142,7 +138,7 @@ func TestClusterToInfrastructureMapFunc(t *testing.T) {
 			output: []reconcile.Request{
 				{
 					NamespacedName: client.ObjectKey{
-						Namespace: "default",
+						Namespace: metav1.NamespaceDefault,
 						Name:      "infra-1",
 					},
 				},
@@ -152,17 +148,17 @@ func TestClusterToInfrastructureMapFunc(t *testing.T) {
 			name: "should return no matching reconcile requests",
 			input: schema.GroupVersionKind{
 				Group:   "foo.cluster.x-k8s.io",
-				Version: "v1alpha4",
+				Version: "v1beta1",
 				Kind:    "TestCluster",
 			},
 			request: &clusterv1.Cluster{
 				ObjectMeta: metav1.ObjectMeta{
-					Namespace: "default",
+					Namespace: metav1.NamespaceDefault,
 					Name:      "test-1",
 				},
 				Spec: clusterv1.ClusterSpec{
 					InfrastructureRef: &corev1.ObjectReference{
-						APIVersion: "bar.cluster.x-k8s.io/v1alpha4",
+						APIVersion: "bar.cluster.x-k8s.io/v1beta1",
 						Kind:       "TestCluster",
 						Name:       "bar-1",
 					},
@@ -396,18 +392,14 @@ func TestIsOwnedByObject(t *testing.T) {
 func TestGetOwnerClusterSuccessByName(t *testing.T) {
 	g := NewWithT(t)
 
-	scheme := runtime.NewScheme()
-	g.Expect(clusterv1.AddToScheme(scheme)).To(Succeed())
-
 	myCluster := &clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-cluster",
-			Namespace: "my-ns",
+			Namespace: metav1.NamespaceDefault,
 		},
 	}
 
 	c := fake.NewClientBuilder().
-		WithScheme(scheme).
 		WithObjects(myCluster).
 		Build()
 
@@ -419,7 +411,7 @@ func TestGetOwnerClusterSuccessByName(t *testing.T) {
 				Name:       "my-cluster",
 			},
 		},
-		Namespace: "my-ns",
+		Namespace: metav1.NamespaceDefault,
 		Name:      "my-resource-owned-by-cluster",
 	}
 	cluster, err := GetOwnerCluster(ctx, c, objm)
@@ -436,18 +428,14 @@ func TestGetOwnerClusterSuccessByName(t *testing.T) {
 func TestGetOwnerMachineSuccessByName(t *testing.T) {
 	g := NewWithT(t)
 
-	scheme := runtime.NewScheme()
-	g.Expect(clusterv1.AddToScheme(scheme)).To(Succeed())
-
 	myMachine := &clusterv1.Machine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-machine",
-			Namespace: "my-ns",
+			Namespace: metav1.NamespaceDefault,
 		},
 	}
 
 	c := fake.NewClientBuilder().
-		WithScheme(scheme).
 		WithObjects(myMachine).
 		Build()
 
@@ -459,7 +447,7 @@ func TestGetOwnerMachineSuccessByName(t *testing.T) {
 				Name:       "my-machine",
 			},
 		},
-		Namespace: "my-ns",
+		Namespace: metav1.NamespaceDefault,
 		Name:      "my-resource-owned-by-machine",
 	}
 	machine, err := GetOwnerMachine(ctx, c, objm)
@@ -470,18 +458,14 @@ func TestGetOwnerMachineSuccessByName(t *testing.T) {
 func TestGetOwnerMachineSuccessByNameFromDifferentVersion(t *testing.T) {
 	g := NewWithT(t)
 
-	scheme := runtime.NewScheme()
-	g.Expect(clusterv1.AddToScheme(scheme)).To(Succeed())
-
 	myMachine := &clusterv1.Machine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-machine",
-			Namespace: "my-ns",
+			Namespace: metav1.NamespaceDefault,
 		},
 	}
 
 	c := fake.NewClientBuilder().
-		WithScheme(scheme).
 		WithObjects(myMachine).
 		Build()
 
@@ -493,67 +477,12 @@ func TestGetOwnerMachineSuccessByNameFromDifferentVersion(t *testing.T) {
 				Name:       "my-machine",
 			},
 		},
-		Namespace: "my-ns",
+		Namespace: metav1.NamespaceDefault,
 		Name:      "my-resource-owned-by-machine",
 	}
 	machine, err := GetOwnerMachine(ctx, c, objm)
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(machine).NotTo(BeNil())
-}
-
-func TestGetMachinesForCluster(t *testing.T) {
-	g := NewWithT(t)
-
-	scheme := runtime.NewScheme()
-	g.Expect(clusterv1.AddToScheme(scheme)).To(Succeed())
-
-	cluster := &clusterv1.Cluster{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "my-cluster",
-			Namespace: "my-ns",
-		},
-	}
-
-	machine := &clusterv1.Machine{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "my-machine",
-			Namespace: cluster.Namespace,
-			Labels: map[string]string{
-				clusterv1.ClusterLabelName: cluster.Name,
-			},
-		},
-	}
-
-	machineDifferentClusterNameSameNamespace := &clusterv1.Machine{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "other-machine",
-			Namespace: cluster.Namespace,
-			Labels: map[string]string{
-				clusterv1.ClusterLabelName: "other-cluster",
-			},
-		},
-	}
-
-	machineSameClusterNameDifferentNamespace := &clusterv1.Machine{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "other-machine",
-			Namespace: "other-ns",
-			Labels: map[string]string{
-				clusterv1.ClusterLabelName: cluster.Name,
-			},
-		},
-	}
-
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-		machine,
-		machineDifferentClusterNameSameNamespace,
-		machineSameClusterNameDifferentNamespace,
-	).Build()
-
-	machines, err := GetMachinesForCluster(ctx, c, cluster)
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(machines.Items).To(HaveLen(1))
-	g.Expect(machines.Items[0].Labels[clusterv1.ClusterLabelName]).To(Equal(cluster.Name))
 }
 
 func TestIsExternalManagedControlPlane(t *testing.T) {
@@ -662,9 +591,6 @@ func TestEnsureOwnerRef(t *testing.T) {
 func TestClusterToObjectsMapper(t *testing.T) {
 	g := NewWithT(t)
 
-	scheme := runtime.NewScheme()
-	g.Expect(clusterv1.AddToScheme(scheme)).To(Succeed())
-
 	cluster := &clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test1",
@@ -747,8 +673,8 @@ func TestClusterToObjectsMapper(t *testing.T) {
 
 	for _, tc := range table {
 		tc.objects = append(tc.objects, cluster)
-		client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tc.objects...).Build()
-		f, err := ClusterToObjectsMapper(client, tc.input, scheme)
+		client := fake.NewClientBuilder().WithObjects(tc.objects...).Build()
+		f, err := ClusterToObjectsMapper(client, tc.input, scheme.Scheme)
 		g.Expect(err != nil, err).To(Equal(tc.expectError))
 		g.Expect(f(cluster)).To(ConsistOf(tc.output))
 	}
@@ -856,7 +782,7 @@ func TestRemoveOwnerRef(t *testing.T) {
 			Name:       "m4g1c",
 		},
 		{
-			APIVersion: "bar.cluster.x-k8s.io/v1alpha4",
+			APIVersion: "bar.cluster.x-k8s.io/v1beta1",
 			Kind:       "TestCluster",
 			Name:       "bar-1",
 		},

@@ -33,7 +33,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 )
@@ -138,10 +138,10 @@ func dumpObject(resource runtime.Object, logPath string) {
 	namespace := metaObj.GetNamespace()
 	name := metaObj.GetName()
 
-	resourceFilePath := path.Join(logPath, namespace, kind, name+".yaml")
-	Expect(os.MkdirAll(filepath.Dir(resourceFilePath), 0755)).To(Succeed(), "Failed to create folder %s", filepath.Dir(resourceFilePath))
+	resourceFilePath := filepath.Clean(path.Join(logPath, namespace, kind, name+".yaml"))
+	Expect(os.MkdirAll(filepath.Dir(resourceFilePath), 0750)).To(Succeed(), "Failed to create folder %s", filepath.Dir(resourceFilePath))
 
-	f, err := os.OpenFile(resourceFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(resourceFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	Expect(err).ToNot(HaveOccurred(), "Failed to open %s", resourceFilePath)
 	defer f.Close()
 

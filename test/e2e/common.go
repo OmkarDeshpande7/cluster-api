@@ -26,13 +26,14 @@ import (
 	"github.com/onsi/gomega/types"
 	corev1 "k8s.io/api/core/v1"
 
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/util"
 )
 
 // Test suite constants for e2e config variables.
 const (
+	KubernetesVersionManagement  = "KUBERNETES_VERSION_MANAGEMENT"
 	KubernetesVersion            = "KUBERNETES_VERSION"
 	CNIPath                      = "CNI"
 	CNIResources                 = "CNI_RESOURCES"
@@ -40,6 +41,7 @@ const (
 	KubernetesVersionUpgradeTo   = "KUBERNETES_VERSION_UPGRADE_TO"
 	EtcdVersionUpgradeTo         = "ETCD_VERSION_UPGRADE_TO"
 	CoreDNSVersionUpgradeTo      = "COREDNS_VERSION_UPGRADE_TO"
+	IPFamily                     = "IP_FAMILY"
 )
 
 func Byf(format string, a ...interface{}) {
@@ -62,7 +64,7 @@ func dumpSpecResourcesAndCleanup(ctx context.Context, specName string, clusterPr
 	Byf("Dumping logs from the %q workload cluster", cluster.Name)
 
 	// Dump all the logs from the workload cluster before deleting them.
-	clusterProxy.CollectWorkloadClusterLogs(ctx, cluster.Namespace, cluster.Name, filepath.Join(artifactFolder, "clusters", cluster.Name, "machines"))
+	clusterProxy.CollectWorkloadClusterLogs(ctx, cluster.Namespace, cluster.Name, filepath.Join(artifactFolder, "clusters", cluster.Name))
 
 	Byf("Dumping all the Cluster API resources in the %q namespace", namespace.Name)
 

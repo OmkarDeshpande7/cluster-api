@@ -40,6 +40,10 @@ type ClusterUpgradeConformanceSpecInput struct {
 	BootstrapClusterProxy framework.ClusterProxy
 	ArtifactFolder        string
 	SkipCleanup           bool
+	SkipConformanceTests  bool
+
+	// Flavor to use when creating the cluster for testing, "upgrades" is used if not specified.
+	Flavor *string
 }
 
 // ClusterUpgradeConformanceSpec implements a spec that upgrades a cluster and runs the Kubernetes conformance suite.
@@ -63,7 +67,7 @@ func ClusterUpgradeConformanceSpec(ctx context.Context, inputGetter func() Clust
 		Expect(input.E2EConfig).ToNot(BeNil(), "Invalid argument. input.E2EConfig can't be nil when calling %s spec", specName)
 		Expect(input.ClusterctlConfigPath).To(BeAnExistingFile(), "Invalid argument. input.ClusterctlConfigPath must be an existing file when calling %s spec", specName)
 		Expect(input.BootstrapClusterProxy).ToNot(BeNil(), "Invalid argument. input.BootstrapClusterProxy can't be nil when calling %s spec", specName)
-		Expect(os.MkdirAll(input.ArtifactFolder, 0755)).To(Succeed(), "Invalid argument. input.ArtifactFolder can't be created for %s spec", specName)
+		Expect(os.MkdirAll(input.ArtifactFolder, 0750)).To(Succeed(), "Invalid argument. input.ArtifactFolder can't be created for %s spec", specName)
 
 		Expect(input.E2EConfig.Variables).To(HaveKey(KubernetesVersionUpgradeFrom))
 		Expect(input.E2EConfig.Variables).To(HaveKey(KubernetesVersionUpgradeTo))
@@ -83,10 +87,9 @@ func ClusterUpgradeConformanceSpec(ctx context.Context, inputGetter func() Clust
 		By("Creating a workload cluster")
 
 		var controlPlaneMachineCount int64 = 1
-		// clusterTemplateWorkerMachineCount is used for ConfigCluster, as it is used for MachineDeployment and
-		// MachinePool, we actually get 2 * clusterTemplateWorkerMachineCount Machines
+		// clusterTemplateWorkerMachineCount is used for ConfigCluster, as it is used for MachineDeployments and
+		// MachinePools
 		var clusterTemplateWorkerMachineCount int64 = 2
-		var workerMachineCount = 2 * clusterTemplateWorkerMachineCount
 
 		clusterctl.ApplyClusterTemplateAndWait(ctx, clusterctl.ApplyClusterTemplateAndWaitInput{
 			ClusterProxy: input.BootstrapClusterProxy,
@@ -95,7 +98,7 @@ func ClusterUpgradeConformanceSpec(ctx context.Context, inputGetter func() Clust
 				ClusterctlConfigPath:     input.ClusterctlConfigPath,
 				KubeconfigPath:           input.BootstrapClusterProxy.GetKubeconfigPath(),
 				InfrastructureProvider:   clusterctl.DefaultInfrastructureProvider,
-				Flavor:                   "upgrades",
+				Flavor:                   pointer.StringDeref(input.Flavor, "upgrades"),
 				Namespace:                namespace.Name,
 				ClusterName:              fmt.Sprintf("%s-%s", specName, util.RandomString(6)),
 				KubernetesVersion:        input.E2EConfig.GetVariable(KubernetesVersionUpgradeFrom),
@@ -130,14 +133,18 @@ func ClusterUpgradeConformanceSpec(ctx context.Context, inputGetter func() Clust
 			WaitForMachinesToBeUpgraded: input.E2EConfig.GetIntervals(specName, "wait-worker-nodes"),
 		})
 
-		By("Upgrading the machinepool instances")
-		framework.UpgradeMachinePoolAndWait(ctx, framework.UpgradeMachinePoolAndWaitInput{
-			ClusterProxy:                   input.BootstrapClusterProxy,
-			Cluster:                        clusterResources.Cluster,
-			UpgradeVersion:                 input.E2EConfig.GetVariable(KubernetesVersionUpgradeTo),
-			WaitForMachinePoolToBeUpgraded: input.E2EConfig.GetIntervals(specName, "wait-machine-pool-upgrade"),
-			MachinePools:                   clusterResources.MachinePools,
-		})
+		// Only attempt to upgrade MachinePools if they were provided in the template,
+		// also adjust the expected workerMachineCount if we have MachinePools
+		if len(clusterResources.MachinePools) > 0 {
+			By("Upgrading the machinepool instances")
+			framework.UpgradeMachinePoolAndWait(ctx, framework.UpgradeMachinePoolAndWaitInput{
+				ClusterProxy:                   input.BootstrapClusterProxy,
+				Cluster:                        clusterResources.Cluster,
+				UpgradeVersion:                 input.E2EConfig.GetVariable(KubernetesVersionUpgradeTo),
+				WaitForMachinePoolToBeUpgraded: input.E2EConfig.GetIntervals(specName, "wait-machine-pool-upgrade"),
+				MachinePools:                   clusterResources.MachinePools,
+			})
+		}
 
 		By("Waiting until nodes are ready")
 		workloadProxy := input.BootstrapClusterProxy.GetWorkloadCluster(ctx, namespace.Name, clusterResources.Cluster.Name)
@@ -145,24 +152,26 @@ func ClusterUpgradeConformanceSpec(ctx context.Context, inputGetter func() Clust
 		framework.WaitForNodesReady(ctx, framework.WaitForNodesReadyInput{
 			Lister:            workloadClient,
 			KubernetesVersion: input.E2EConfig.GetVariable(KubernetesVersionUpgradeTo),
-			Count:             int(controlPlaneMachineCount + workerMachineCount),
+			Count:             int(clusterResources.ExpectedTotalNodes()),
 			WaitForNodesReady: input.E2EConfig.GetIntervals(specName, "wait-nodes-ready"),
 		})
 
-		By("Running conformance tests")
+		if !input.SkipConformanceTests {
+			By("Running conformance tests")
+			// Start running the conformance test suite.
+			err := kubetest.Run(
+				ctx,
+				kubetest.RunInput{
+					ClusterProxy:       workloadProxy,
+					NumberOfNodes:      int(clusterResources.ExpectedWorkerNodes()),
+					ArtifactsDirectory: input.ArtifactFolder,
+					ConfigFilePath:     kubetestConfigFilePath,
+					GinkgoNodes:        int(clusterResources.ExpectedWorkerNodes()),
+				},
+			)
+			Expect(err).ToNot(HaveOccurred(), "Failed to run Kubernetes conformance")
+		}
 
-		// Start running the conformance test suite.
-		err := kubetest.Run(
-			ctx,
-			kubetest.RunInput{
-				ClusterProxy:       workloadProxy,
-				NumberOfNodes:      int(workerMachineCount),
-				ArtifactsDirectory: input.ArtifactFolder,
-				ConfigFilePath:     kubetestConfigFilePath,
-				GinkgoNodes:        int(workerMachineCount),
-			},
-		)
-		Expect(err).ToNot(HaveOccurred(), "Failed to run Kubernetes conformance")
 		By("PASSED!")
 	})
 

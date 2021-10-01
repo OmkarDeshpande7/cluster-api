@@ -92,8 +92,8 @@ type DockerMachineStatus struct {
 
 // +kubebuilder:resource:path=dockermachines,scope=Namespaced,categories=cluster-api
 // +kubebuilder:object:root=true
-// +kubebuilder:storageversion
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Time duration since creation of DockerMachine"
 
 // DockerMachine is the Schema for the dockermachines API.
 type DockerMachine struct {
@@ -104,10 +104,12 @@ type DockerMachine struct {
 	Status DockerMachineStatus `json:"status,omitempty"`
 }
 
+// GetConditions returns the set of conditions for this object.
 func (c *DockerMachine) GetConditions() clusterv1.Conditions {
 	return c.Status.Conditions
 }
 
+// SetConditions sets the conditions on this object.
 func (c *DockerMachine) SetConditions(conditions clusterv1.Conditions) {
 	c.Status.Conditions = conditions
 }

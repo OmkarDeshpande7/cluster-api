@@ -20,31 +20,21 @@ import (
 	"testing"
 
 	fuzz "github.com/google/gofuzz"
-	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/apitesting/fuzzer"
 	runtimeserializer "k8s.io/apimachinery/pkg/runtime/serializer"
-
-	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha4"
-	"sigs.k8s.io/cluster-api/bootstrap/kubeadm/types/v1beta1"
+	"sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1beta1"
+	"sigs.k8s.io/cluster-api/bootstrap/kubeadm/types/upstreamv1beta1"
 	utilconversion "sigs.k8s.io/cluster-api/util/conversion"
 )
 
 func TestFuzzyConversion(t *testing.T) {
-	g := NewWithT(t)
-	scheme := runtime.NewScheme()
-	g.Expect(AddToScheme(scheme)).To(Succeed())
-	g.Expect(v1alpha4.AddToScheme(scheme)).To(Succeed())
-
 	t.Run("for KubeadmConfig", utilconversion.FuzzTestFunc(utilconversion.FuzzTestFuncInput{
-		Scheme:      scheme,
-		Hub:         &v1alpha4.KubeadmConfig{},
+		Hub:         &v1beta1.KubeadmConfig{},
 		Spoke:       &KubeadmConfig{},
 		FuzzerFuncs: []fuzzer.FuzzerFuncs{fuzzFuncs},
 	}))
 	t.Run("for KubeadmConfigTemplate", utilconversion.FuzzTestFunc(utilconversion.FuzzTestFuncInput{
-		Scheme:      scheme,
-		Hub:         &v1alpha4.KubeadmConfigTemplate{},
+		Hub:         &v1beta1.KubeadmConfigTemplate{},
 		Spoke:       &KubeadmConfigTemplate{},
 		FuzzerFuncs: []fuzzer.FuzzerFuncs{fuzzFuncs},
 	}))
@@ -55,26 +45,48 @@ func fuzzFuncs(_ runtimeserializer.CodecFactory) []interface{} {
 		KubeadmConfigStatusFuzzer,
 		dnsFuzzer,
 		clusterConfigurationFuzzer,
+		// This custom functions are needed when ConvertTo/ConvertFrom functions
+		// uses the json package to unmarshal the bootstrap token string.
+		//
+		// The Kubeadm BootstrapTokenString type ships with a custom
+		// json string representation, in particular it supplies a customized
+		// UnmarshalJSON function that can return an error if the string
+		// isn't in the correct form.
+		//
+		// This function effectively disables any fuzzing for the token by setting
+		// the values for ID and Secret to working alphanumeric values.
+		kubeadmBootstrapTokenStringFuzzerV1UpstreamBeta1,
+		kubeadmBootstrapTokenStringFuzzerV1Beta1,
 	}
 }
 
 func KubeadmConfigStatusFuzzer(obj *KubeadmConfigStatus, c fuzz.Continue) {
 	c.FuzzNoCustom(obj)
 
-	// KubeadmConfigStatus.BootstrapData has been removed in v1alpha4, so setting it to nil in order to avoid v1alpha3 --> v1alpha4 --> v1alpha3 round trip errors.
+	// KubeadmConfigStatus.BootstrapData has been removed in v1alpha4, so setting it to nil in order to avoid v1alpha3 --> <hub> --> v1alpha3 round trip errors.
 	obj.BootstrapData = nil
 }
 
-func dnsFuzzer(obj *v1beta1.DNS, c fuzz.Continue) {
+func dnsFuzzer(obj *upstreamv1beta1.DNS, c fuzz.Continue) {
 	c.FuzzNoCustom(obj)
 
-	// DNS.Type does not exists in v1alpha4, so setting it to empty string in order to avoid v1alpha3 --> v1alpha4 --> v1alpha3 round trip errors.
+	// DNS.Type does not exists in v1alpha4, so setting it to empty string in order to avoid v1alpha3 --> <hub> --> v1alpha3 round trip errors.
 	obj.Type = ""
 }
 
-func clusterConfigurationFuzzer(obj *v1beta1.ClusterConfiguration, c fuzz.Continue) {
+func clusterConfigurationFuzzer(obj *upstreamv1beta1.ClusterConfiguration, c fuzz.Continue) {
 	c.FuzzNoCustom(obj)
 
-	// ClusterConfiguration.UseHyperKubeImage has been removed in v1alpha4, so setting it to false in order to avoid v1beta1 --> v1alpha4 --> v1beta1 round trip errors.
+	// ClusterConfiguration.UseHyperKubeImage has been removed in v1alpha4, so setting it to false in order to avoid v1beta1 --> <hub> --> v1beta1 round trip errors.
 	obj.UseHyperKubeImage = false
+}
+
+func kubeadmBootstrapTokenStringFuzzerV1UpstreamBeta1(in *upstreamv1beta1.BootstrapTokenString, c fuzz.Continue) {
+	in.ID = "abcdef"
+	in.Secret = "abcdef0123456789"
+}
+
+func kubeadmBootstrapTokenStringFuzzerV1Beta1(in *v1beta1.BootstrapTokenString, c fuzz.Continue) {
+	in.ID = "abcdef"
+	in.Secret = "abcdef0123456789"
 }

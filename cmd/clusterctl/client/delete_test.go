@@ -51,7 +51,7 @@ func Test_clusterctlClient_Delete(t *testing.T) {
 					Kubeconfig:              Kubeconfig{Path: "kubeconfig", Context: "mgmt-context"},
 					IncludeNamespace:        false,
 					IncludeCRDs:             false,
-					Namespace:               "",
+					SkipInventory:           false,
 					CoreProvider:            "",
 					BootstrapProviders:      nil,
 					InfrastructureProviders: nil,
@@ -63,30 +63,6 @@ func Test_clusterctlClient_Delete(t *testing.T) {
 			wantErr:       false,
 		},
 		{
-			name: "Delete single provider",
-			fields: fields{
-				client: fakeClusterForDelete(),
-			},
-			args: args{
-				options: DeleteOptions{
-					Kubeconfig:              Kubeconfig{Path: "kubeconfig", Context: "mgmt-context"},
-					IncludeNamespace:        false,
-					IncludeCRDs:             false,
-					Namespace:               "capbpk-system",
-					CoreProvider:            "",
-					BootstrapProviders:      []string{bootstrapProviderConfig.Name()},
-					InfrastructureProviders: nil,
-					ControlPlaneProviders:   nil,
-					DeleteAll:               false,
-				},
-			},
-			wantProviders: sets.NewString(
-				capiProviderConfig.Name(),
-				clusterctlv1.ManifestLabel(controlPlaneProviderConfig.Name(), controlPlaneProviderConfig.Type()),
-				clusterctlv1.ManifestLabel(infraProviderConfig.Name(), infraProviderConfig.Type())),
-			wantErr: false,
-		},
-		{
 			name: "Delete single provider auto-detect namespace",
 			fields: fields{
 				client: fakeClusterForDelete(),
@@ -96,7 +72,7 @@ func Test_clusterctlClient_Delete(t *testing.T) {
 					Kubeconfig:              Kubeconfig{Path: "kubeconfig", Context: "mgmt-context"},
 					IncludeNamespace:        false,
 					IncludeCRDs:             false,
-					Namespace:               "", // empty namespace triggers namespace auto detection
+					SkipInventory:           false,
 					CoreProvider:            "",
 					BootstrapProviders:      []string{bootstrapProviderConfig.Name()},
 					InfrastructureProviders: nil,
@@ -120,7 +96,7 @@ func Test_clusterctlClient_Delete(t *testing.T) {
 					Kubeconfig:              Kubeconfig{Path: "kubeconfig", Context: "mgmt-context"},
 					IncludeNamespace:        false,
 					IncludeCRDs:             false,
-					Namespace:               "", // empty namespace triggers namespace auto detection
+					SkipInventory:           false,
 					CoreProvider:            capiProviderConfig.Name(),
 					BootstrapProviders:      []string{bootstrapProviderConfig.Name()},
 					InfrastructureProviders: nil,
@@ -131,29 +107,6 @@ func Test_clusterctlClient_Delete(t *testing.T) {
 			wantProviders: sets.NewString(
 				clusterctlv1.ManifestLabel(controlPlaneProviderConfig.Name(), controlPlaneProviderConfig.Type()),
 				clusterctlv1.ManifestLabel(infraProviderConfig.Name(), infraProviderConfig.Type())),
-			wantErr: false,
-		},
-		{
-			name: "Delete all providers in a namespace",
-			fields: fields{
-				client: fakeClusterForDelete(),
-			},
-			args: args{
-				options: DeleteOptions{
-					Kubeconfig:              Kubeconfig{Path: "kubeconfig", Context: "mgmt-context"},
-					IncludeNamespace:        false,
-					IncludeCRDs:             false,
-					Namespace:               namespace,
-					CoreProvider:            "",
-					BootstrapProviders:      nil,
-					InfrastructureProviders: nil,
-					ControlPlaneProviders:   nil,
-					DeleteAll:               true,
-				},
-			},
-			wantProviders: sets.NewString(
-				capiProviderConfig.Name(),
-				clusterctlv1.ManifestLabel(bootstrapProviderConfig.Name(), bootstrapProviderConfig.Type())),
 			wantErr: false,
 		},
 	}
@@ -201,10 +154,10 @@ func fakeClusterForDelete() *fakeClient {
 	repository4 := newFakeRepository(infraProviderConfig, config1)
 
 	cluster1 := newFakeCluster(cluster.Kubeconfig{Path: "kubeconfig", Context: "mgmt-context"}, config1)
-	cluster1.fakeProxy.WithProviderInventory(capiProviderConfig.Name(), capiProviderConfig.Type(), "v1.0.0", "capi-system", "")
-	cluster1.fakeProxy.WithProviderInventory(bootstrapProviderConfig.Name(), bootstrapProviderConfig.Type(), "v1.0.0", "capbpk-system", "")
-	cluster1.fakeProxy.WithProviderInventory(controlPlaneProviderConfig.Name(), controlPlaneProviderConfig.Type(), "v1.0.0", namespace, "")
-	cluster1.fakeProxy.WithProviderInventory(infraProviderConfig.Name(), infraProviderConfig.Type(), "v1.0.0", namespace, "")
+	cluster1.fakeProxy.WithProviderInventory(capiProviderConfig.Name(), capiProviderConfig.Type(), "v1.0.0", "capi-system")
+	cluster1.fakeProxy.WithProviderInventory(bootstrapProviderConfig.Name(), bootstrapProviderConfig.Type(), "v1.0.0", "capbpk-system")
+	cluster1.fakeProxy.WithProviderInventory(controlPlaneProviderConfig.Name(), controlPlaneProviderConfig.Type(), "v1.0.0", namespace)
+	cluster1.fakeProxy.WithProviderInventory(infraProviderConfig.Name(), infraProviderConfig.Type(), "v1.0.0", namespace)
 	cluster1.fakeProxy.WithFakeCAPISetup()
 
 	client := newFakeClient(config1).

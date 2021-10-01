@@ -21,7 +21,7 @@ import (
 
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	clusterctlv1 "sigs.k8s.io/cluster-api/cmd/clusterctl/api/v1alpha3"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/client/cluster"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/client/config"
@@ -107,7 +107,7 @@ func fakeClientForRollout() *fakeClient {
 	md1 := &clusterv1.MachineDeployment{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "MachineDeployment",
-			APIVersion: "cluster.x-k8s.io/v1alpha4",
+			APIVersion: "cluster.x-k8s.io/v1beta1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "default",
@@ -117,7 +117,7 @@ func fakeClientForRollout() *fakeClient {
 	md2 := &clusterv1.MachineDeployment{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "MachineDeployment",
-			APIVersion: "cluster.x-k8s.io/v1alpha4",
+			APIVersion: "cluster.x-k8s.io/v1beta1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "default",
@@ -129,8 +129,8 @@ func fakeClientForRollout() *fakeClient {
 		WithProvider(infra)
 
 	cluster1 := newFakeCluster(cluster.Kubeconfig{Path: "kubeconfig", Context: "mgmt-context"}, config1).
-		WithProviderInventory(core.Name(), core.Type(), "v1.0.0", "cluster-api-system", "").
-		WithProviderInventory(infra.Name(), infra.Type(), "v2.0.0", "infra-system", "").
+		WithProviderInventory(core.Name(), core.Type(), "v1.0.0", "cluster-api-system").
+		WithProviderInventory(infra.Name(), infra.Type(), "v2.0.0", "infra-system").
 		WithObjs(md1).
 		WithObjs(md2)
 

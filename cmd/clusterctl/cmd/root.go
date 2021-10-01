@@ -41,6 +41,7 @@ var (
 	verbosity *int
 )
 
+// RootCmd is clusterctl root CLI command.
 var RootCmd = &cobra.Command{
 	Use:          "clusterctl",
 	SilenceUsage: true,
@@ -87,6 +88,7 @@ var RootCmd = &cobra.Command{
 	},
 }
 
+// Execute executes the root command.
 func Execute() {
 	if err := RootCmd.Execute(); err != nil {
 		if verbosity != nil && *verbosity >= 5 {
@@ -110,7 +112,7 @@ func init() {
 	RootCmd.PersistentFlags().StringVar(&cfgFile, "config", "",
 		"Path to clusterctl configuration (default is `$HOME/.cluster-api/clusterctl.yaml`) or to a remote location (i.e. https://example.com/clusterctl.yaml)")
 
-	cobra.OnInitialize(initConfig)
+	cobra.OnInitialize(initConfig, registerCompletionFuncForCommonFlags)
 }
 
 func initConfig() {
@@ -133,7 +135,25 @@ func initConfig() {
 	logf.SetLogger(logf.NewLogger(logf.WithThreshold(verbosity)))
 }
 
-const Indentation = `  `
+func registerCompletionFuncForCommonFlags() {
+	visitCommands(RootCmd, func(cmd *cobra.Command) {
+		if kubeconfigFlag := cmd.Flags().Lookup("kubeconfig"); kubeconfigFlag != nil {
+			// context in kubeconfig
+			for _, flagName := range []string{"kubeconfig-context", "to-kubeconfig-context"} {
+				_ = cmd.RegisterFlagCompletionFunc(flagName, contextCompletionFunc(kubeconfigFlag))
+			}
+
+			if contextFlag := cmd.Flags().Lookup("kubeconfig-context"); contextFlag != nil {
+				// namespace
+				for _, flagName := range []string{"namespace", "target-namespace", "from-config-map-namespace"} {
+					_ = cmd.RegisterFlagCompletionFunc(flagName, resourceNameCompletionFunc(kubeconfigFlag, contextFlag, nil, "v1", "namespace"))
+				}
+			}
+		}
+	})
+}
+
+const indentation = `  `
 
 // LongDesc normalizes a command's long description to follow the conventions.
 func LongDesc(s string) string {
@@ -171,7 +191,7 @@ func (s normalizer) indent() normalizer {
 	indentedLines := make([]string, 0, len(splitLines))
 	for _, line := range splitLines {
 		trimmed := strings.TrimSpace(line)
-		indented := Indentation + trimmed
+		indented := indentation + trimmed
 		indentedLines = append(indentedLines, indented)
 	}
 	s.string = strings.Join(indentedLines, "\n")

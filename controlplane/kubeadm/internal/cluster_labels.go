@@ -17,13 +17,22 @@ limitations under the License.
 package internal
 
 import (
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
 )
 
-// ControlPlaneLabelsForCluster returns a set of labels to add to a control plane machine for this specific cluster.
-func ControlPlaneLabelsForCluster(clusterName string) map[string]string {
-	return map[string]string{
-		clusterv1.ClusterLabelName:             clusterName,
-		clusterv1.MachineControlPlaneLabelName: "",
+// ControlPlaneMachineLabelsForCluster returns a set of labels to add to a control plane machine for this specific cluster.
+func ControlPlaneMachineLabelsForCluster(kcp *controlplanev1.KubeadmControlPlane, clusterName string) map[string]string {
+	labels := map[string]string{}
+
+	// Add the labels from the MachineTemplate.
+	// Note: we intentionally don't use the map directly to ensure we don't modify the map in KCP.
+	for k, v := range kcp.Spec.MachineTemplate.ObjectMeta.Labels {
+		labels[k] = v
 	}
+
+	// Always force these labels over the ones coming from the spec.
+	labels[clusterv1.ClusterLabelName] = clusterName
+	labels[clusterv1.MachineControlPlaneLabelName] = ""
+	return labels
 }

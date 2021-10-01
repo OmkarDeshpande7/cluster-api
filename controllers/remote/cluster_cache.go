@@ -18,6 +18,7 @@ package remote
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -31,13 +32,14 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
@@ -46,26 +48,59 @@ const (
 	healthCheckPollInterval       = 10 * time.Second
 	healthCheckRequestTimeout     = 5 * time.Second
 	healthCheckUnhealthyThreshold = 10
-	ClusterCacheControllerName    = "cluster-cache-tracker"
+	clusterCacheControllerName    = "cluster-cache-tracker"
 )
 
 // ClusterCacheTracker manages client caches for workload clusters.
 type ClusterCacheTracker struct {
-	log    logr.Logger
-	client client.Client
-	scheme *runtime.Scheme
+	log                   logr.Logger
+	clientUncachedObjects []client.Object
+	client                client.Client
+	scheme                *runtime.Scheme
 
 	lock             sync.RWMutex
 	clusterAccessors map[client.ObjectKey]*clusterAccessor
+	indexes          []Index
+}
+
+// ClusterCacheTrackerOptions defines options to configure
+// a ClusterCacheTracker.
+type ClusterCacheTrackerOptions struct {
+	// Log is the logger used throughout the lifecycle of caches.
+	// Defaults to a no-op logger if it's not set.
+	Log logr.Logger
+
+	// ClientUncachedObjects instructs the Client to never cache the following objects,
+	// it'll instead query the API server directly.
+	// Defaults to never caching ConfigMap and Secret if not set.
+	ClientUncachedObjects []client.Object
+	Indexes               []Index
+}
+
+func setDefaultOptions(opts *ClusterCacheTrackerOptions) {
+	if opts.Log == nil {
+		opts.Log = log.NullLogger{}
+	}
+
+	if len(opts.ClientUncachedObjects) == 0 {
+		opts.ClientUncachedObjects = []client.Object{
+			&corev1.ConfigMap{},
+			&corev1.Secret{},
+		}
+	}
 }
 
 // NewClusterCacheTracker creates a new ClusterCacheTracker.
-func NewClusterCacheTracker(log logr.Logger, manager ctrl.Manager) (*ClusterCacheTracker, error) {
+func NewClusterCacheTracker(manager ctrl.Manager, options ClusterCacheTrackerOptions) (*ClusterCacheTracker, error) {
+	setDefaultOptions(&options)
+
 	return &ClusterCacheTracker{
-		log:              log,
-		client:           manager.GetClient(),
-		scheme:           manager.GetScheme(),
-		clusterAccessors: make(map[client.ObjectKey]*clusterAccessor),
+		log:                   options.Log,
+		clientUncachedObjects: options.ClientUncachedObjects,
+		client:                manager.GetClient(),
+		scheme:                manager.GetScheme(),
+		clusterAccessors:      make(map[client.ObjectKey]*clusterAccessor),
+		indexes:               options.Indexes,
 	}, nil
 }
 
@@ -74,7 +109,7 @@ func (t *ClusterCacheTracker) GetClient(ctx context.Context, cluster client.Obje
 	t.lock.Lock()
 	defer t.lock.Unlock()
 
-	accessor, err := t.getClusterAccessorLH(ctx, cluster)
+	accessor, err := t.getClusterAccessorLH(ctx, cluster, t.indexes...)
 	if err != nil {
 		return nil, err
 	}
@@ -100,13 +135,13 @@ func (t *ClusterCacheTracker) clusterAccessorExists(cluster client.ObjectKey) bo
 
 // getClusterAccessorLH first tries to return an already-created clusterAccessor for cluster, falling back to creating a
 // new clusterAccessor if needed. Note, this method requires t.lock to already be held (LH=lock held).
-func (t *ClusterCacheTracker) getClusterAccessorLH(ctx context.Context, cluster client.ObjectKey) (*clusterAccessor, error) {
+func (t *ClusterCacheTracker) getClusterAccessorLH(ctx context.Context, cluster client.ObjectKey, indexes ...Index) (*clusterAccessor, error) {
 	a := t.clusterAccessors[cluster]
 	if a != nil {
 		return a, nil
 	}
 
-	a, err := t.newClusterAccessor(ctx, cluster)
+	a, err := t.newClusterAccessor(ctx, cluster, indexes...)
 	if err != nil {
 		return nil, errors.Wrap(err, "error creating client and cache for remote cluster")
 	}
@@ -117,9 +152,9 @@ func (t *ClusterCacheTracker) getClusterAccessorLH(ctx context.Context, cluster 
 }
 
 // newClusterAccessor creates a new clusterAccessor.
-func (t *ClusterCacheTracker) newClusterAccessor(ctx context.Context, cluster client.ObjectKey) (*clusterAccessor, error) {
+func (t *ClusterCacheTracker) newClusterAccessor(ctx context.Context, cluster client.ObjectKey, indexes ...Index) (*clusterAccessor, error) {
 	// Get a rest config for the remote cluster
-	config, err := RESTConfig(ctx, ClusterCacheControllerName, t.client, cluster)
+	config, err := RESTConfig(ctx, clusterCacheControllerName, t.client, cluster)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error fetching REST client config for remote cluster %q", cluster.String())
 	}
@@ -154,8 +189,17 @@ func (t *ClusterCacheTracker) newClusterAccessor(ctx context.Context, cluster cl
 		cancelFunc: cacheCtxCancel,
 	}
 
+	for _, index := range indexes {
+		if err := cache.IndexField(ctx, index.Object, index.Field, index.ExtractValue); err != nil {
+			return nil, fmt.Errorf("failed to index field %s: %w", index.Field, err)
+		}
+	}
+
 	// Start the cache!!!
-	go cache.Start(cacheCtx)
+	go cache.Start(cacheCtx) //nolint:errcheck
+	if !cache.WaitForCacheSync(cacheCtx) {
+		return nil, fmt.Errorf("failed waiting for cache for remote cluster %v to sync: %w", cluster, err)
+	}
 
 	// Start cluster healthcheck!!!
 	go t.healthCheckCluster(cacheCtx, &healthCheckInput{
@@ -164,12 +208,9 @@ func (t *ClusterCacheTracker) newClusterAccessor(ctx context.Context, cluster cl
 	})
 
 	delegatingClient, err := client.NewDelegatingClient(client.NewDelegatingClientInput{
-		CacheReader: cache,
-		Client:      c,
-		UncachedObjects: []client.Object{
-			&corev1.ConfigMap{},
-			&corev1.Secret{},
-		},
+		CacheReader:     cache,
+		Client:          c,
+		UncachedObjects: t.clientUncachedObjects,
 	})
 	if err != nil {
 		return nil, err
@@ -237,13 +278,13 @@ func (t *ClusterCacheTracker) Watch(ctx context.Context, input WatchInput) error
 	t.lock.Lock()
 	defer t.lock.Unlock()
 
-	a, err := t.getClusterAccessorLH(ctx, input.Cluster)
+	a, err := t.getClusterAccessorLH(ctx, input.Cluster, t.indexes...)
 	if err != nil {
 		return err
 	}
 
 	if a.watches.Has(input.Name) {
-		t.log.V(4).Info("Watch already exists", "namespace", input.Cluster.Namespace, "cluster", input.Cluster.Name, "name", input.Name)
+		t.log.V(6).Info("Watch already exists", "namespace", input.Cluster.Namespace, "cluster", input.Cluster.Name, "name", input.Name)
 		return nil
 	}
 

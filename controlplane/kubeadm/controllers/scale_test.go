@@ -28,11 +28,10 @@ import (
 	"sigs.k8s.io/cluster-api/util/conditions"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
-	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha4"
-	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1beta1"
+	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controlplane/kubeadm/internal"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -41,9 +40,9 @@ import (
 func TestKubeadmControlPlaneReconciler_initializeControlPlane(t *testing.T) {
 	g := NewWithT(t)
 
-	cluster, kcp, genericMachineTemplate := createClusterWithControlPlane()
+	cluster, kcp, genericMachineTemplate := createClusterWithControlPlane(metav1.NamespaceDefault)
 
-	fakeClient := newFakeClient(g, cluster.DeepCopy(), kcp.DeepCopy(), genericMachineTemplate.DeepCopy())
+	fakeClient := newFakeClient(cluster.DeepCopy(), kcp.DeepCopy(), genericMachineTemplate.DeepCopy())
 
 	r := &KubeadmControlPlaneReconciler{
 		Client:   fakeClient,
@@ -88,7 +87,7 @@ func TestKubeadmControlPlaneReconciler_scaleUpControlPlane(t *testing.T) {
 	t.Run("creates a control plane Machine if preflight checks pass", func(t *testing.T) {
 		g := NewWithT(t)
 
-		cluster, kcp, genericMachineTemplate := createClusterWithControlPlane()
+		cluster, kcp, genericMachineTemplate := createClusterWithControlPlane(metav1.NamespaceDefault)
 		setKCPHealthy(kcp)
 		initObjs := []client.Object{cluster.DeepCopy(), kcp.DeepCopy(), genericMachineTemplate.DeepCopy()}
 
@@ -104,7 +103,7 @@ func TestKubeadmControlPlaneReconciler_scaleUpControlPlane(t *testing.T) {
 			initObjs = append(initObjs, m.DeepCopy())
 		}
 
-		fakeClient := newFakeClient(g, initObjs...)
+		fakeClient := newFakeClient(initObjs...)
 
 		r := &KubeadmControlPlaneReconciler{
 			Client:                    fakeClient,
@@ -127,8 +126,8 @@ func TestKubeadmControlPlaneReconciler_scaleUpControlPlane(t *testing.T) {
 		g.Expect(controlPlaneMachines.Items).To(HaveLen(3))
 	})
 	t.Run("does not create a control plane Machine if preflight checks fail", func(t *testing.T) {
-		cluster, kcp, genericMachineTemplate := createClusterWithControlPlane()
-		initObjs := []client.Object{cluster.DeepCopy(), kcp.DeepCopy(), genericMachineTemplate.DeepCopy()}
+		cluster, kcp, genericMachineTemplate := createClusterWithControlPlane(metav1.NamespaceDefault)
+		initObjs := []client.Object{fakeGenericMachineTemplateCRD, cluster.DeepCopy(), kcp.DeepCopy(), genericMachineTemplate.DeepCopy()}
 		cluster.Spec.ControlPlaneEndpoint.Host = "nodomain.example.com"
 		cluster.Spec.ControlPlaneEndpoint.Port = 6443
 
@@ -141,7 +140,7 @@ func TestKubeadmControlPlaneReconciler_scaleUpControlPlane(t *testing.T) {
 
 		g := NewWithT(t)
 
-		fakeClient := newFakeClient(g, initObjs...)
+		fakeClient := newFakeClient(initObjs...)
 		fmc := &fakeManagementCluster{
 			Machines: beforeMachines.DeepCopy(),
 			Workload: fakeWorkloadCluster{},
@@ -166,7 +165,7 @@ func TestKubeadmControlPlaneReconciler_scaleUpControlPlane(t *testing.T) {
 		endMachines := collections.FromMachineList(controlPlaneMachines)
 		for _, m := range endMachines {
 			bm, ok := beforeMachines[m.Name]
-			bm.SetResourceVersion("1")
+			bm.SetResourceVersion("999")
 			g.Expect(ok).To(BeTrue())
 			g.Expect(m).To(Equal(bm))
 		}
@@ -181,7 +180,7 @@ func TestKubeadmControlPlaneReconciler_scaleDownControlPlane_NoError(t *testing.
 			"one": machine("one"),
 		}
 		setMachineHealthy(machines["one"])
-		fakeClient := newFakeClient(g, machines["one"])
+		fakeClient := newFakeClient(machines["one"])
 
 		r := &KubeadmControlPlaneReconciler{
 			recorder: record.NewFakeRecorder(32),
@@ -192,7 +191,11 @@ func TestKubeadmControlPlaneReconciler_scaleDownControlPlane_NoError(t *testing.
 		}
 
 		cluster := &clusterv1.Cluster{}
-		kcp := &controlplanev1.KubeadmControlPlane{}
+		kcp := &controlplanev1.KubeadmControlPlane{
+			Spec: controlplanev1.KubeadmControlPlaneSpec{
+				Version: "v1.19.1",
+			},
+		}
 		setKCPHealthy(kcp)
 		controlPlane := &internal.ControlPlane{
 			KCP:      kcp,
@@ -218,7 +221,7 @@ func TestKubeadmControlPlaneReconciler_scaleDownControlPlane_NoError(t *testing.
 		}
 		setMachineHealthy(machines["two"])
 		setMachineHealthy(machines["three"])
-		fakeClient := newFakeClient(g, machines["one"], machines["two"], machines["three"])
+		fakeClient := newFakeClient(machines["one"], machines["two"], machines["three"])
 
 		r := &KubeadmControlPlaneReconciler{
 			recorder: record.NewFakeRecorder(32),
@@ -229,7 +232,11 @@ func TestKubeadmControlPlaneReconciler_scaleDownControlPlane_NoError(t *testing.
 		}
 
 		cluster := &clusterv1.Cluster{}
-		kcp := &controlplanev1.KubeadmControlPlane{}
+		kcp := &controlplanev1.KubeadmControlPlane{
+			Spec: controlplanev1.KubeadmControlPlaneSpec{
+				Version: "v1.19.1",
+			},
+		}
 		controlPlane := &internal.ControlPlane{
 			KCP:      kcp,
 			Cluster:  cluster,
@@ -254,7 +261,7 @@ func TestKubeadmControlPlaneReconciler_scaleDownControlPlane_NoError(t *testing.
 			"three": machine("three", withTimestamp(time.Now())),
 		}
 		setMachineHealthy(machines["three"])
-		fakeClient := newFakeClient(g, machines["one"], machines["two"], machines["three"])
+		fakeClient := newFakeClient(machines["one"], machines["two"], machines["three"])
 
 		r := &KubeadmControlPlaneReconciler{
 			recorder: record.NewFakeRecorder(32),
@@ -382,8 +389,6 @@ func TestSelectMachineForScaleDown(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
-
-			g.Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())
 
 			selectedMachine, err := selectMachineForScaleDown(tc.cp, tc.outDatedMachines)
 

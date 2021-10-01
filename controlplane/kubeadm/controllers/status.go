@@ -18,11 +18,12 @@ package controllers
 
 import (
 	"context"
+
 	"sigs.k8s.io/cluster-api/util/collections"
 
 	"github.com/pkg/errors"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
-	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controlplane/kubeadm/internal"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/conditions"
@@ -63,6 +64,12 @@ func (r *KubeadmControlPlaneReconciler) updateStatus(ctx context.Context, kcp *c
 	// and we don't want to report resize condition (because it is set to deleting into reconcile delete).
 	if !kcp.DeletionTimestamp.IsZero() {
 		return nil
+	}
+
+	machinesWithHealthAPIServer := ownedMachines.Filter(collections.HealthyAPIServer())
+	lowestVersion := machinesWithHealthAPIServer.LowestVersion()
+	if lowestVersion != nil {
+		kcp.Status.Version = lowestVersion
 	}
 
 	switch {

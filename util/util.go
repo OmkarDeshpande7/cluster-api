@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package util implements utilities.
 package util
 
 import (
@@ -29,7 +30,6 @@ import (
 	"github.com/gobuffalo/flect"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,9 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8sversion "k8s.io/apimachinery/pkg/version"
-	"k8s.io/client-go/metadata"
-	"k8s.io/client-go/rest"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -53,8 +51,14 @@ const (
 )
 
 var (
-	rnd                          = rand.New(rand.NewSource(time.Now().UnixNano())) //nolint:gosec
-	ErrNoCluster                 = fmt.Errorf("no %q label present", clusterv1.ClusterLabelName)
+	rnd = rand.New(rand.NewSource(time.Now().UnixNano())) //nolint:gosec
+
+	// ErrNoCluster is returned when the cluster
+	// label could not be found on the object passed in.
+	ErrNoCluster = fmt.Errorf("no %q label present", clusterv1.ClusterLabelName)
+
+	// ErrUnstructuredFieldNotFound determines that a field
+	// in an unstructured object could not be found.
 	ErrUnstructuredFieldNotFound = fmt.Errorf("field not found")
 )
 
@@ -127,10 +131,10 @@ func IsControlPlaneMachine(machine *clusterv1.Machine) bool {
 }
 
 // IsNodeReady returns true if a node is ready.
-func IsNodeReady(node *v1.Node) bool {
+func IsNodeReady(node *corev1.Node) bool {
 	for _, condition := range node.Status.Conditions {
-		if condition.Type == v1.NodeReady {
-			return condition.Status == v1.ConditionTrue
+		if condition.Type == corev1.NodeReady {
+			return condition.Status == corev1.ConditionTrue
 		}
 	}
 
@@ -171,7 +175,7 @@ func GetClusterByName(ctx context.Context, c client.Client, namespace, name stri
 	}
 
 	if err := c.Get(ctx, key, cluster); err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "failed to get Cluster/%s", name)
 	}
 
 	return cluster, nil
@@ -392,9 +396,9 @@ func HasOwner(refList []metav1.OwnerReference, apiVersion string, kinds []string
 		return false
 	}
 
-	kMap := make(map[string]bool)
+	kindMap := make(map[string]bool)
 	for _, kind := range kinds {
-		kMap[kind] = true
+		kindMap[kind] = true
 	}
 
 	for _, mr := range refList {
@@ -403,12 +407,25 @@ func HasOwner(refList []metav1.OwnerReference, apiVersion string, kinds []string
 			return false
 		}
 
-		if mrGroupVersion.Group == gv.Group && kMap[mr.Kind] {
+		if mrGroupVersion.Group == gv.Group && kindMap[mr.Kind] {
 			return true
 		}
 	}
 
 	return false
+}
+
+// GetGVKMetadata retrieves a CustomResourceDefinition metadata from the API server using partial object metadata.
+//
+// This function is greatly more efficient than GetCRDWithContract and should be preferred in most cases.
+func GetGVKMetadata(ctx context.Context, c client.Client, gvk schema.GroupVersionKind) (*metav1.PartialObjectMetadata, error) {
+	meta := &metav1.PartialObjectMetadata{}
+	meta.SetName(fmt.Sprintf("%s.%s", flect.Pluralize(strings.ToLower(gvk.Kind)), gvk.Group))
+	meta.SetGroupVersionKind(apiextensionsv1.SchemeGroupVersion.WithKind("CustomResourceDefinition"))
+	if err := c.Get(ctx, client.ObjectKeyFromObject(meta), meta); err != nil {
+		return meta, errors.Wrap(err, "failed to retrieve metadata from GVK resource")
+	}
+	return meta, nil
 }
 
 // GetCRDWithContract retrieves a list of CustomResourceDefinitions from using controller-runtime Client,
@@ -435,29 +452,6 @@ func GetCRDWithContract(ctx context.Context, c client.Client, gvk schema.GroupVe
 	}
 
 	return nil, errors.Errorf("failed to find a CustomResourceDefinition for %v with contract %q", gvk, contract)
-}
-
-// GetCRDMetadataFromGVK retrieves a CustomResourceDefinition metadata from the API server using client-go's metadata only client.
-//
-// This function is greatly more efficient than GetCRDWithContract and should be preferred in most cases.
-func GetCRDMetadataFromGVK(ctx context.Context, restConfig *rest.Config, gvk schema.GroupVersionKind) (*metav1.PartialObjectMetadata, error) {
-	// Make sure a rest config is available.
-	if restConfig == nil {
-		return nil, errors.Errorf("cannot create a metadata client without a rest config")
-	}
-
-	// Create a metadata-only client.
-	metadataClient, err := metadata.NewForConfig(restConfig)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to create metadata only client")
-	}
-
-	// Get the partial metadata CRD.
-	generatedName := fmt.Sprintf("%s.%s", flect.Pluralize(strings.ToLower(gvk.Kind)), gvk.Group)
-
-	return metadataClient.Resource(
-		apiextensionsv1.SchemeGroupVersion.WithResource("customresourcedefinitions"),
-	).Get(ctx, generatedName, metav1.GetOptions{})
 }
 
 // KubeAwareAPIVersions is a sortable slice of kube-like version strings.

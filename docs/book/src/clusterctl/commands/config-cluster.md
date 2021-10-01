@@ -1,5 +1,14 @@
 # clusterctl config cluster
 
+<aside class="note warning">
+
+<h1> Warning! </h1>
+
+This command has been deprecated and it will be removed in future releases.
+Use [`clusterctl generate cluster`](generate-cluster.md).
+
+</aside>
+
 The `clusterctl config cluster` command returns a YAML template for creating a workload cluster.
 
 For example
@@ -75,7 +84,7 @@ Use the `--from` flag to read cluster templates stored in a GitHub repository or
 
 ```
 clusterctl config cluster my-cluster --kubernetes-version v1.16.3 \
-   --from https://github.com/my-org/my-repository/blob/master/my-template.yaml > my-cluster.yaml
+   --from https://github.com/my-org/my-repository/blob/main/my-template.yaml > my-cluster.yaml
 ```
 
 or
