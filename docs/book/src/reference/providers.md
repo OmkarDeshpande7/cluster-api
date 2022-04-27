@@ -7,7 +7,7 @@ updated info about which API version they are supporting.
 
 ## Bootstrap
 - [Kubeadm](https://github.com/kubernetes-sigs/cluster-api/tree/main/bootstrap/kubeadm)
-- [Talos](https://github.com/talos-systems/cluster-api-bootstrap-provider-talos)
+- [Talos](https://github.com/siderolabs/cluster-api-bootstrap-provider-talos)
 - [EKS](https://github.com/kubernetes-sigs/cluster-api-provider-aws/tree/main/bootstrap/eks)
 
 ## Infrastructure
@@ -16,16 +16,21 @@ updated info about which API version they are supporting.
 - [Azure](https://github.com/kubernetes-sigs/cluster-api-provider-azure)
 - [Azure Stack HCI](https://github.com/microsoft/cluster-api-provider-azurestackhci)
 - [Baidu Cloud](https://github.com/baidu/cluster-api-provider-baiducloud)
+- [BYOH](https://github.com/vmware-tanzu/cluster-api-provider-bringyourownhost)
 - [Metal3](https://github.com/metal3-io/cluster-api-provider-metal3)
 - [DigitalOcean](https://github.com/kubernetes-sigs/cluster-api-provider-digitalocean)
 - [Exoscale](https://github.com/exoscale/cluster-api-provider-exoscale)
 - [GCP](https://github.com/kubernetes-sigs/cluster-api-provider-gcp)
+- [Hetzner](https://github.com/syself/cluster-api-provider-hetzner)
 - [IBM Cloud](https://github.com/kubernetes-sigs/cluster-api-provider-ibmcloud)
+- [KubeVirt](https://github.com/kubernetes-sigs/cluster-api-provider-kubevirt)
 - [MAAS](https://github.com/spectrocloud/cluster-api-provider-maas)
 - [Nested](https://github.com/kubernetes-sigs/cluster-api-provider-nested)
+- [Nutanix](https://github.com/nutanix-cloud-native/cluster-api-provider-nutanix)
+- [OCI](https://github.com/oracle/cluster-api-provider-oci)
 - [OpenStack](https://github.com/kubernetes-sigs/cluster-api-provider-openstack)
-- [Packet](https://github.com/kubernetes-sigs/cluster-api-provider-packet)
-- [Sidero](https://github.com/talos-systems/sidero)
+- [Equinix Metal (formerly Packet)](https://github.com/kubernetes-sigs/cluster-api-provider-packet)
+- [Sidero](https://github.com/siderolabs/sidero)
 - [Tencent Cloud](https://github.com/TencentCloud/cluster-api-provider-tencent)
 - [vSphere](https://github.com/kubernetes-sigs/cluster-api-provider-vsphere)
 

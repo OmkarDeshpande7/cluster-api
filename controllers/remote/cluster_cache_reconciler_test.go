@@ -25,12 +25,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	"sigs.k8s.io/cluster-api/util"
 )
 
 func TestClusterCacheReconciler(t *testing.T) {
@@ -91,7 +91,6 @@ func TestClusterCacheReconciler(t *testing.T) {
 
 			t.Log("Creating the ClusterCacheReconciler")
 			r := &ClusterCacheReconciler{
-				Log:     log.NullLogger{},
 				Client:  mgr.GetClient(),
 				Tracker: cct,
 			}

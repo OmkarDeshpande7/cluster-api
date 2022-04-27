@@ -1,8 +1,9 @@
-<a href="https://cluster-api.sigs.k8s.io"><img alt="capi" src="./docs/book/src/images/introduction.png" width="160x" /></a>
+<a href="https://cluster-api.sigs.k8s.io"><img alt="capi" src="./logos/kubernetes-cluster-logos_final-02.svg" width="160x" /></a>
 <p>
-<a href="https://prow.k8s.io/?job=post-cluster-api-push-images">
-<img alt="Build Status" src="https://prow.k8s.io/badge.svg?jobs=post-cluster-api-push-images"></a>
 <a href="https://godoc.org/sigs.k8s.io/cluster-api"><img src="https://godoc.org/sigs.k8s.io/cluster-api?status.svg"></a>
+<!-- join kubernetes slack channel for cluster-api -->
+<a href="http://slack.k8s.io/">
+<img src="https://img.shields.io/badge/join%20slack-%23cluster--api-brightgreen"></a>
 </p>
 
 # Cluster API
@@ -35,7 +36,6 @@ If you have questions or want to get the latest project news, you can connect wi
 
 - Chat with us on the Kubernetes [Slack](http://slack.k8s.io/) in the [#cluster-api][#cluster-api slack] channel
 - Subscribe to the [SIG Cluster Lifecycle](https://groups.google.com/forum/#!forum/kubernetes-sig-cluster-lifecycle) Google Group for access to documents and calendars
-- Participate in the conversations on [Kubernetes Discuss][kubernetes discuss]
 - Join our Cluster API working group sessions where we share the latest project news, demos, answer questions, and triage issues
     - Weekly on Wednesdays @ 10:00 PT on [Zoom][zoomMeeting]
     - Previous meetings: \[ [notes][notes] | [recordings][recordings] \]
@@ -51,7 +51,7 @@ See also our [contributor guide](CONTRIBUTING.md) and the Kubernetes [community 
 Participation in the Kubernetes community is governed by the [Kubernetes Code of Conduct](code-of-conduct.md).
 
 [community page]: https://kubernetes.io/community
-[notes]: https://docs.google.com/document/d/1LdooNTbb9PZMFWy3_F-XAsl7Og5F2lvG3tCgQvoB5e4
+[notes]: https://docs.google.com/document/d/1ushaVqAKYnZ2VN_aa3GyKlS4kEd6bSug13xaXOakAQI
 [recordings]: https://www.youtube.com/playlist?list=PL69nYSiGNLP29D0nYgAGWt1ZFqS9Z7lw4
 [zoomMeeting]: https://zoom.us/j/861487554
 [implementerNotes]: https://docs.google.com/document/d/1IZ2-AZhe4r3CYiJuttyciS7bGZTTx4iMppcA8_Pr3xE/edit
@@ -59,7 +59,6 @@ Participation in the Kubernetes community is governed by the [Kubernetes Code of
 [providerZoomMeetingWed]: https://zoom.us/j/424743530
 [issue tracker]: https://github.com/kubernetes-sigs/cluster-api/issues
 [#cluster-api slack]: https://kubernetes.slack.com/archives/C8TSNPY4T
-[kubernetes discuss]: https://discuss.kubernetes.io/c/contributors/cluster-api
 [Good first issue]: https://github.com/kubernetes-sigs/cluster-api/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22
 [Help wanted]: https://github.com/kubernetes-sigs/cluster-api/issues?utf8=%E2%9C%93&q=is%3Aopen+is%3Aissue+label%3A%22help+wanted%22+
 

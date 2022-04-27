@@ -61,6 +61,8 @@ vendor
 # User-supplied Tiltfile extensions, settings, and builds
 tilt.d
 tilt-settings.json
+tilt-settings.yaml
+tilt_modules
 .tiltbuild
 
 # User-supplied clusterctl hacks settings
@@ -69,6 +71,9 @@ clusterctl-settings.json
 # test results
 _artifacts
 
-#release artifacts
+# release artifacts
 out
 _releasenotes
+
+# Helm
+.helm

@@ -8,7 +8,7 @@ Much of the information here was adapted directly from it.
 This is an _infrastructure_ provider - tasked with managing provider-specific resources for clusters and machines.
 There are also [bootstrap providers][bootstrap], which turn machines into Kubernetes nodes.
 
-[bootstrap]: https://cluster-api.sigs.k8s.io/reference/providers.html?highlight=bootstrap#bootstrap
+[bootstrap]: ../../../reference/providers.md#bootstrap
 
 ## Prerequisites
 
@@ -33,18 +33,20 @@ brew install kustomize
 
 ```bash
 # Install kubectl
-KUBECTL_VERSION=$(curl -sf https://dl.k8s.io/release/stable.txt)
+KUBECTL_VERSION=$(curl -sfL https://dl.k8s.io/release/stable.txt)
 curl -fLO https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl
 
 # Install kustomize
 OS_TYPE=linux
+FILE=kustomize_*_${OS_TYPE}_amd64.tar.gz
 curl -sf https://api.github.com/repos/kubernetes-sigs/kustomize/releases/latest |\
   grep browser_download |\
   grep ${OS_TYPE} |\
   cut -d '"' -f 4 |\
   xargs curl -f -O -L
-mv kustomize_*_${OS_TYPE}_amd64 /usr/local/bin/kustomize
-chmod u+x /usr/local/bin/kustomize
+tar zxvf $FILE; rm -f $FILE
+sudo mv kustomize /usr/local/bin/kustomize
+sudo chmod u+x /usr/local/bin/kustomize
 ```
 
 {{#/tab }}

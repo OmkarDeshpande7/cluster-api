@@ -145,7 +145,7 @@ defined in the [Cluster API test framework] to check if the operation completed 
 
 ### Naming the test spec
 
-You can categorize the test with a custom label that can be used to filter a category of E2E tests to be run. Currently, the cluster-api codebase has [these labels](./testing.html#running-specific-tests) which are used to run a focused subset of tests.
+You can categorize the test with a custom label that can be used to filter a category of E2E tests to be run. Currently, the cluster-api codebase has [these labels](./testing.md#running-specific-tests) which are used to run a focused subset of tests.
 
 ## Tear down
 
@@ -199,7 +199,7 @@ The [test E2E package] provides examples of how this can be achieved by implemen
 test specs for the most common Cluster API use cases.
 
 <!-- links -->
-[Cluster API quick start]: https://cluster-api.sigs.k8s.io/user/quick-start.html
+[Cluster API quick start]:  ../user/quick-start.md
 [Cluster API test framework]: https://pkg.go.dev/sigs.k8s.io/cluster-api/test/framework?tab=doc
 [deprecated E2E config file]: https://pkg.go.dev/sigs.k8s.io/cluster-api/test/framework?tab=doc#Config
 [deprecated InitManagementCluster method]: https://pkg.go.dev/sigs.k8s.io/cluster-api/test/framework?tab=doc#InitManagementCluster

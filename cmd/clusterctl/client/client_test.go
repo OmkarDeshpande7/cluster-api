@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	clusterctlv1 "sigs.k8s.io/cluster-api/cmd/clusterctl/api/v1alpha3"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/client/cluster"
@@ -34,7 +35,6 @@ import (
 	yaml "sigs.k8s.io/cluster-api/cmd/clusterctl/client/yamlprocessor"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/internal/scheme"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/internal/test"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // TestNewFakeClient is a fake test to document fakeClient usage.
@@ -148,6 +148,10 @@ func (f fakeClient) RolloutUndo(options RolloutOptions) error {
 	return f.internalClient.RolloutUndo(options)
 }
 
+func (f fakeClient) TopologyPlan(options TopologyPlanOptions) (*cluster.TopologyPlanOutput, error) {
+	return f.internalClient.TopologyPlan(options)
+}
+
 // newFakeClient returns a clusterctl client that allows to execute tests on a set of fake config, fake repositories and fake clusters.
 // you can use WithCluster and WithRepository to prepare for the test case.
 func newFakeClient(configClient config.Client) *fakeClient {
@@ -165,7 +169,7 @@ func newFakeClient(configClient config.Client) *fakeClient {
 		// converting the client.Kubeconfig to cluster.Kubeconfig alias
 		k := cluster.Kubeconfig(i.Kubeconfig)
 		if _, ok := fake.clusters[k]; !ok {
-			return nil, errors.Errorf("Cluster for kubeconfig %q and/or context %q does not exist.", i.Kubeconfig.Path, i.Kubeconfig.Context)
+			return nil, errors.Errorf("Cluster for kubeconfig %q and/or context %q does not exist", i.Kubeconfig.Path, i.Kubeconfig.Context)
 		}
 		return fake.clusters[k], nil
 	}
@@ -175,7 +179,7 @@ func newFakeClient(configClient config.Client) *fakeClient {
 		InjectClusterClientFactory(clusterClientFactory),
 		InjectRepositoryFactory(func(input RepositoryClientFactoryInput) (repository.Client, error) {
 			if _, ok := fake.repositories[input.Provider.ManifestLabel()]; !ok {
-				return nil, errors.Errorf("Repository for kubeconfig %q does not exist.", input.Provider.ManifestLabel())
+				return nil, errors.Errorf("repository for kubeconfig %q does not exist", input.Provider.ManifestLabel())
 			}
 			return fake.repositories[input.Provider.ManifestLabel()], nil
 		}),
@@ -218,7 +222,7 @@ func newFakeCluster(kubeconfig cluster.Kubeconfig, configClient config.Client) *
 		cluster.InjectPollImmediateWaiter(pollImmediateWaiter),
 		cluster.InjectRepositoryFactory(func(provider config.Provider, configClient config.Client, options ...repository.Option) (repository.Client, error) {
 			if _, ok := fake.repositories[provider.Name()]; !ok {
-				return nil, errors.Errorf("Repository for kubeconfig %q does not exists.", provider.Name())
+				return nil, errors.Errorf("repository for kubeconfig %q does not exist", provider.Name())
 			}
 			return fake.repositories[provider.Name()], nil
 		}),
@@ -316,6 +320,10 @@ func (f *fakeClusterClient) Template() cluster.TemplateClient {
 
 func (f *fakeClusterClient) WorkloadCluster() cluster.WorkloadCluster {
 	return f.internalclient.WorkloadCluster()
+}
+
+func (f *fakeClusterClient) Topology() cluster.TopologyClient {
+	return f.internalclient.Topology()
 }
 
 func (f *fakeClusterClient) WithObjs(objs ...client.Object) *fakeClusterClient {
@@ -436,7 +444,7 @@ func (f fakeRepositoryClient) Components() repository.ComponentsClient {
 }
 
 func (f fakeRepositoryClient) Templates(version string) repository.TemplateClient {
-	// use a fakeTemplateClient (instead of the internal client used in other fake objects) we can de deterministic on what is returned (e.g. avoid interferences from overrides)
+	// Use a fakeTemplateClient (instead of the internal client used in other fake objects) we can be deterministic on what is returned (e.g. avoid interferences from overrides)
 	return &fakeTemplateClient{
 		version:               version,
 		fakeRepository:        f.fakeRepository,
@@ -445,8 +453,18 @@ func (f fakeRepositoryClient) Templates(version string) repository.TemplateClien
 	}
 }
 
+func (f fakeRepositoryClient) ClusterClasses(version string) repository.ClusterClassClient {
+	// Use a fakeTemplateClient (instead of the internal client used in other fake objects) we can be deterministic on what is returned (e.g. avoid interferences from overrides)
+	return &fakeClusterClassClient{
+		version:               version,
+		fakeRepository:        f.fakeRepository,
+		configVariablesClient: f.configClient.Variables(),
+		processor:             f.processor,
+	}
+}
+
 func (f fakeRepositoryClient) Metadata(version string) repository.MetadataClient {
-	// use a fakeMetadataClient (instead of the internal client used in other fake objects) we can de deterministic on what is returned (e.g. avoid interferences from overrides)
+	// Use a fakeMetadataClient (instead of the internal client used in other fake objects) we can be deterministic on what is returned (e.g. avoid interferences from overrides)
 	return &fakeMetadataClient{
 		version:        version,
 		fakeRepository: f.fakeRepository,
@@ -493,6 +511,29 @@ func (f *fakeTemplateClient) Get(flavor, targetNamespace string, skipTemplatePro
 	}
 	name = fmt.Sprintf("%s.yaml", name)
 
+	content, err := f.fakeRepository.GetFile(f.version, name)
+	if err != nil {
+		return nil, err
+	}
+	return repository.NewTemplate(repository.TemplateInput{
+		RawArtifact:           content,
+		ConfigVariablesClient: f.configVariablesClient,
+		Processor:             f.processor,
+		TargetNamespace:       targetNamespace,
+		SkipTemplateProcess:   skipTemplateProcess,
+	})
+}
+
+// fakeClusterClassClient provides a super simple TemplateClient (e.g. without support for local overrides).
+type fakeClusterClassClient struct {
+	version               string
+	fakeRepository        *repository.MemoryRepository
+	configVariablesClient config.VariablesClient
+	processor             yaml.Processor
+}
+
+func (f *fakeClusterClassClient) Get(class, targetNamespace string, skipTemplateProcess bool) (repository.Template, error) {
+	name := fmt.Sprintf("clusterclass-%s.yaml", class)
 	content, err := f.fakeRepository.GetFile(f.version, name)
 	if err != nil {
 		return nil, err

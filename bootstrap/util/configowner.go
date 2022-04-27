@@ -25,11 +25,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controllers/external"
 	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api/feature"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // ConfigOwner provides a data interface for different config owner types.
@@ -44,6 +45,32 @@ func (co ConfigOwner) IsInfrastructureReady() bool {
 		return false
 	}
 	return infrastructureReady
+}
+
+// HasNodeRefs checks if the config owner has nodeRefs. For a Machine this means
+// that it has a nodeRef. For a MachinePool it means that it has as many nodeRefs
+// as there are replicas.
+func (co ConfigOwner) HasNodeRefs() bool {
+	if co.IsMachinePool() {
+		numExpectedNodes, found, err := unstructured.NestedInt64(co.Object, "spec", "replicas")
+		if err != nil {
+			return false
+		}
+		// replicas default to 1 so this is what we should use if nothing is specified
+		if !found {
+			numExpectedNodes = 1
+		}
+		nodeRefs, _, err := unstructured.NestedSlice(co.Object, "status", "nodeRefs")
+		if err != nil {
+			return false
+		}
+		return len(nodeRefs) == int(numExpectedNodes)
+	}
+	nodeRef, _, err := unstructured.NestedMap(co.Object, "status", "nodeRef")
+	if err != nil {
+		return false
+	}
+	return len(nodeRef) > 0
 }
 
 // ClusterName extracts spec.clusterName from the config owner.

@@ -47,14 +47,23 @@ Cluster API Provider DigitalOcean
 ### CAPG
 Cluster API Google Cloud Provider
 
+### CAPH
+Cluster API Provider Hetzner
+
 ### CAPIBM
 Cluster API Provider IBM Cloud
 
 ### CAPN
 Cluster API Provider Nested
 
+### CAPX
+Cluster API Provider Nutanix
+
 ### CAPO
 Cluster API Provider OpenStack
+
+### CAPOCI
+Cluster API Provider Oracle Cloud Infrastructure (OCI)
 
 ### CAPV
 Cluster API Provider vSphere
@@ -181,7 +190,7 @@ The pivot process is also used for deleting a management cluster and could also 
 
 ### Provider
 
-See [Infrastructure Provider](#user-content-infrastructure-provider)
+See [Infrastructure Provider](#infrastructure-provider)
 
 ### Provider components
 
@@ -206,7 +215,7 @@ is running as a static pod.
 
 ### Server
 
-The infrastructure that backs a [Machine Resource](#user-content-machine), typically either a cloud instance, virtual machine, or physical host.
+The infrastructure that backs a [Machine Resource](#machine), typically either a cloud instance, virtual machine, or physical host.
 
 # W
 ---

@@ -29,7 +29,7 @@ To get started with this template:
   Aim for single topic PRs to keep discussions focused.
   If you disagree with what is already in a document, open a new PR with suggested changes.
 
-The canonical place for the latest set of instructions (and the likely source of this file) is [here](/docs/proposals/YYYYMMDD-template.md).
+The canonical place for the latest set of instructions (and the likely source of this file) is [here](https://raw.githubusercontent.com/kubernetes-sigs/cluster-api/main/docs/proposals/YYYYMMDD-template.md).
 
 The `Metadata` section above is intended to support the creation of tooling around the proposal process.
 This will be a YAML section that is fenced as a code block.
@@ -249,4 +249,4 @@ Consider the following in developing a version skew strategy for this enhancemen
 - [ ] MM/DD/YYYY: Open proposal PR
 
 <!-- Links -->
-[community meeting]: https://docs.google.com/document/d/1Ys-DOR5UsgbMEeciuG0HOgDQc8kZsaWIWJeKJ1-UfbY
+[community meeting]: https://docs.google.com/document/d/1ushaVqAKYnZ2VN_aa3GyKlS4kEd6bSug13xaXOakAQI/edit#heading=h.pxsq37pzkbdq

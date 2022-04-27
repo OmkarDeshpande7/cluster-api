@@ -7,29 +7,15 @@ workflow that offers easy deployments and rapid iterative builds.
 
 ## Prerequisites
 
-1. [Docker](https://docs.docker.com/install/) v19.03 or newer
-1. [kind](https://kind.sigs.k8s.io) v0.9 or newer (other clusters can be
-   used if `preload_images_for_kind` is set to false)
-1. [kustomize](https://kubectl.docs.kubernetes.io/installation/kustomize/)
-   standalone (`kubectl kustomize` does not work because it is missing
-   some features of kustomize v3)
-1. [Tilt](https://docs.tilt.dev/install.html) v0.16.0 or newer
-1. [envsubst](https://github.com/drone/envsubst) or similar to handle
-   clusterctl var replacement. Note: drone/envsubst releases v1.0.2 and
-   earlier do not have the binary packaged under cmd/envsubst. It is
-   available in Go pseudo-version `v1.0.3-0.20200709231038-aa43e1c1a629`
-1. Clone the [Cluster
-   API](https://github.com/kubernetes-sigs/cluster-api) repository
+1. [Docker](https://docs.docker.com/install/): v19.03 or newer
+1. [kind](https://kind.sigs.k8s.io): v0.9 or newer
+1. [Tilt](https://docs.tilt.dev/install.html): v0.22.2 or newer
+1. [kustomize](https://github.com/kubernetes-sigs/kustomize): provided via `make kustomize`
+1. [envsubst](https://github.com/drone/envsubst): provided via `make envsubst`
+1. [helm](https://github.com/helm/helm): v3.7.1 or newer 
+1. Clone the [Cluster API](https://github.com/kubernetes-sigs/cluster-api) repository
    locally
 1. Clone the provider(s) you want to deploy locally as well
-
-We provide a make target to generate the envsubst binary if desired.
-See the [provider contract](./../clusterctl/provider-contract.md) for
-more details about how clusterctl uses variables.
-
-```
-make envsubst
-```
 
 ## Getting started
 
@@ -38,7 +24,7 @@ A script to create a KIND cluster along with a local docker registry and the cor
 
 To create a pre-configured cluster run:
 
-```bash 
+```bash
 ./hack/kind-install-for-capd.sh
 ````
 
@@ -48,19 +34,28 @@ You can see the status of the cluster with:
 kubectl cluster-info --context kind-capi-test
 ```
 
-### Create a tilt-settings.json file
+### Create a tilt-settings file
 
-Next, create a `tilt-settings.json` file and place it in your local copy of `cluster-api`. Here is an example:
+Next, create a `tilt-settings.yaml` file and place it in your local copy of `cluster-api`. Here is an example:
 
-```json
-{
-  "default_registry": "gcr.io/your-project-name-here",
-  "provider_repos": ["../cluster-api-provider-aws"],
-  "enable_providers": ["aws", "docker", "kubeadm-bootstrap", "kubeadm-control-plane"]
-}
+```yaml
+default_registry: gcr.io/your-project-name-here
+provider_repos:
+- ../cluster-api-provider-aws
+enable_providers:
+- aws
+- docker
+- kubeadm-bootstrap
+- kubeadm-control-plane
 ```
 
-#### tilt-settings.json fields
+<aside class="note">
+
+If you prefer JSON, you can create a `tilt-settings.json` file instead. YAML will be preferred if both files are present.
+
+</aside>
+
+#### tilt-settings fields
 
 **allowed_contexts** (Array, default=[]): A list of kubeconfig contexts Tilt is allowed to use. See the Tilt documentation on
 [allow_k8s_contexts](https://docs.tilt.dev/api.html#api.allow_k8s_contexts) for more details.
@@ -68,26 +63,32 @@ Next, create a `tilt-settings.json` file and place it in your local copy of `clu
 **default_registry** (String, default=""): The image registry to use if you need to push images. See the [Tilt
 documentation](https://docs.tilt.dev/api.html#api.default_registry) for more details.
 
+**kind_cluster_name** (String, default="capi-test"): The name of the kind cluster to use when preloading images.
+
 **provider_repos** (Array[]String, default=[]): A list of paths to all the providers you want to use. Each provider must have a
-`tilt-provider.json` file describing how to build the provider.
+`tilt-provider.yaml` or `tilt-provider.json` file describing how to build the provider.
 
 **enable_providers** (Array[]String, default=['docker']): A list of the providers to enable. See [available providers](#available-providers)
 for more details.
 
-**kind_cluster_name** (String, default="kind"): The name of the kind cluster to use when preloading images.
-
 **kustomize_substitutions** (Map{String: String}, default={}): An optional map of substitutions for `${}`-style placeholders in the
-provider's yaml.
+provider's yaml. **Note**: When running E2E tests locally using an existing cluster managed by Tilt, the following substitutions are required for successful tests:
+```yaml
+kustomize_substitutions:
+  CLUSTER_TOPOLOGY: "true"
+  EXP_MACHINE_POOL: "true"
+  EXP_CLUSTER_RESOURCE_SET: "true"
+  EXP_KUBEADM_BOOTSTRAP_FORMAT_IGNITION: "true"
+```
 
 {{#tabs name:"tab-tilt-kustomize-substitution" tabs:"AWS,Azure,DigitalOcean,GCP"}}
 {{#tab AWS}}
 
 For example, if the yaml contains `${AWS_B64ENCODED_CREDENTIALS}`, you could do the following:
 
-```json
-"kustomize_substitutions": {
-  "AWS_B64ENCODED_CREDENTIALS": "your credentials here"
-}
+```yaml
+kustomize_substitutions:
+  AWS_B64ENCODED_CREDENTIALS: "your credentials here"
 ```
 
 {{#/tab }}
@@ -116,26 +117,24 @@ An Azure Service Principal is needed for populating the controller manifests. Th
   AZURE_CLIENT_ID=$(az ad sp show --id http://$AZURE_SERVICE_PRINCIPAL_NAME --query appId --output tsv)
   ```
 
-Add the output of the following as a section in your `tilt-settings.json`:
+Add the output of the following as a section in your `tilt-settings.yaml`:
 
   ```shell
   cat <<EOF
-  "kustomize_substitutions": {
-     "AZURE_SUBSCRIPTION_ID_B64": "$(echo "${AZURE_SUBSCRIPTION_ID}" | tr -d '\n' | base64 | tr -d '\n')",
-     "AZURE_TENANT_ID_B64": "$(echo "${AZURE_TENANT_ID}" | tr -d '\n' | base64 | tr -d '\n')",
-     "AZURE_CLIENT_SECRET_B64": "$(echo "${AZURE_CLIENT_SECRET}" | tr -d '\n' | base64 | tr -d '\n')",
-     "AZURE_CLIENT_ID_B64": "$(echo "${AZURE_CLIENT_ID}" | tr -d '\n' | base64 | tr -d '\n')"
-    }
+  kustomize_substitutions:
+     AZURE_SUBSCRIPTION_ID_B64: "$(echo "${AZURE_SUBSCRIPTION_ID}" | tr -d '\n' | base64 | tr -d '\n')"
+     AZURE_TENANT_ID_B64: "$(echo "${AZURE_TENANT_ID}" | tr -d '\n' | base64 | tr -d '\n')"
+     AZURE_CLIENT_SECRET_B64: "$(echo "${AZURE_CLIENT_SECRET}" | tr -d '\n' | base64 | tr -d '\n')"
+     AZURE_CLIENT_ID_B64: "$(echo "${AZURE_CLIENT_ID}" | tr -d '\n' | base64 | tr -d '\n')"
   EOF
 ```
 
 {{#/tab }}
 {{#tab DigitalOcean}}
 
-```json
-"kustomize_substitutions": {
-  "DO_B64ENCODED_CREDENTIALS": "your credentials here"
-}
+```yaml
+kustomize_substitutions:
+  DO_B64ENCODED_CREDENTIALS: "your credentials here"
 ```
 
 {{#/tab }}
@@ -146,18 +145,83 @@ You can generate a base64 version of your GCP json credentials file using:
 base64 -i ~/path/to/gcp/credentials.json
 ```
 
-```json
-"kustomize_substitutions": {
-  "GCP_B64ENCODED_CREDENTIALS": "your credentials here"
-}
+```yaml
+kustomize_substitutions:
+  GCP_B64ENCODED_CREDENTIALS: "your credentials here"
 ```
 
 {{#/tab }}
 {{#/tabs }}
 
-**deploy_cert_manager** (Boolean, default=`true`): Deploys cert-manager into the cluster for use for webhook registration.
+**deploy_observability** ([string], default=[]): If set, installs on the dev cluster one of more observability
+tools. Supported values are `grafana`, `loki`, `promtail` and/or `prometheus` (Note: the UI for `grafana` and `prometheus` will be accessible via a link in the tilt console).
+Important! This feature requires the `helm` command to be available in the user's path.
 
-**preload_images_for_kind** (Boolean, default=`true`): Uses `kind load docker-image` to preload images into a kind cluster.
+**debug** (Map{string: Map} default{}): A map of named configurations for the provider. The key is the name of the provider.
+
+Supported settings:
+
+  * **port** (int, default=0 (disabled)): If set to anything other than 0, then Tilt will run the provider with delve
+  and port forward the delve server to localhost on the specified debug port. This can then be used with IDEs such as
+  Visual Studio Code, Goland and IntelliJ.
+
+  * **continue** (bool, default=true): By default, Tilt will run delve with `--continue`, such that any provider with
+    debugging turned on will run normally unless specifically having a breakpoint entered. Change to false if you
+    do not want the controller to start at all by default.
+
+  * **profiler_port** (int, default=0 (disabled)): If set to anything other than 0, then Tilt will enable the profiler with
+  `--profiler-address` and set up a port forward. A "profiler" link will be visible in the Tilt Web UI for the controller.
+
+  * **metrics_port** (int, default=0 (disabled)): If set to anything other than 0, then Tilt will port forward to the
+    default metrics port. A "metrics" link will be visible in the Tilt Web UI for the controller.
+
+  * **race_detector** (bool, default=false) (Linux amd64 only): If enabled, Tilt will compile the specified controller with
+    cgo and statically compile in the system glibc and enable the race detector. Currently, this is only supported when
+    building on Linux amd64 systems. You must install glibc-static or have libc.a available for this to work.
+
+    Example: Using the configuration below:
+
+    ```yaml
+      debug:
+        core:
+          continue: false
+          port: 30000
+          profiler_port: 40000
+          metrics_port: 40001
+    ```
+
+    ##### Wiring up debuggers
+    ###### Visual Studio
+    When using the example above, the core CAPI controller can be debugged in Visual Studio Code using the following launch configuration:
+
+    ```json
+    {
+      "version": "0.2.0",
+      "configurations": [
+        {
+          "name": "Core CAPI Controller",
+          "type": "go",
+          "request": "attach",
+          "mode": "remote",
+          "remotePath": "",
+          "port": 30000,
+          "host": "127.0.0.1",
+          "showLog": true,
+          "trace": "log",
+          "logOutput": "rpc"
+        }
+      ]
+    }
+    ```
+
+    ###### Goland / Intellij
+    With the above example, you can configure [a Go Remote run/debug
+    configuration](https://www.jetbrains.com/help/go/attach-to-running-go-processes-with-debugger.html#step-3-create-the-remote-run-debug-configuration-on-the-client-computer)
+    pointing at port 30000.
+
+<br/>
+
+**deploy_cert_manager** (Boolean, default=`true`): Deploys cert-manager into the cluster for use for webhook registration.
 
 **trigger_mode** (String, default=`auto`): Optional setting to configure if tilt should automatically rebuild on changes.
 Set to `manual` to disable auto-rebuilding and require users to trigger rebuilds of individual changed components through the UI.
@@ -167,20 +231,16 @@ for this provider. Each item in the array will be passed in to the manager for t
 
 Example:
 
-```json
-{
-    "extra_args": {
-        "core": ["--feature-gates=MachinePool=true"],
-        "kubeadm-bootstrap": ["--feature-gates=MachinePool=true"],
-        "azure": ["--feature-gates=MachinePool=true"]
-    }
-}
+```yaml
+extra_args:
+  kubeadm-bootstrap:
+  - --logging-format=json
 ```
 
 With this config, the respective managers will be invoked with:
 
 ```bash
-manager --feature-gates=MachinePool=true
+manager --logging-format=json
 ```
 
 ### Run Tilt!
@@ -207,7 +267,7 @@ some of the clusterctl commands like clusterctl config won't work.
 
 This limitation is an acceptable trade-off while executing fast dev-test iterations on controllers logic. If instead
 you are interested in testing clusterctl workflows, you should refer to the
-[clusterctl developer instructions](https://cluster-api.sigs.k8s.io/clusterctl/developers.html).
+[clusterctl developer instructions](../clusterctl/developers.md).
 
 </aside>
 
@@ -218,21 +278,24 @@ The following providers are currently defined in the Tiltfile:
 * **core**: cluster-api itself (Cluster/Machine/MachineDeployment/MachineSet/KubeadmConfig/KubeadmControlPlane)
 * **docker**: Docker provider (DockerCluster/DockerMachine)
 
-### tilt-provider.json
+### tilt-provider configuration
 
-A provider must supply a `tilt-provider.json` file describing how to build it. Here is an example:
+A provider must supply a `tilt-provider.yaml` file describing how to build it. Here is an example:
 
-```json
-{
-    "name": "aws",
-    "config": {
-        "image": "gcr.io/k8s-staging-cluster-api-aws/cluster-api-aws-controller",
-        "live_reload_deps": [
-            "main.go", "go.mod", "go.sum", "api", "cmd", "controllers", "pkg"
-        ]
-    }
-}
+```yaml
+name: aws
+label: CAPA
+config:
+  image: "gcr.io/k8s-staging-cluster-api-aws/cluster-api-aws-controller",
+  live_reload_deps: ["main.go", "go.mod", "go.sum", "api", "cmd", "controllers", "pkg"]
 ```
+
+
+<aside class="note">
+
+If you prefer JSON, you can create a `tilt-provider.json` file instead. YAML will be preferred if both files are present.
+
+</aside>
 
 #### config fields
 
@@ -264,11 +327,9 @@ Set to `false` if your provider does not have a ./config folder or you do not wa
 
 **go_main** (String, default="main.go"): The go main file if not located at the root of the folder
 
-**label** (String, default=provider name): The label to be used to group provider components in the tilt UI 
+**label** (String, default=provider name): The label to be used to group provider components in the tilt UI
 in tilt version >= v0.22.2 (see https://blog.tilt.dev/2021/08/09/resource-grouping.html); as a convention,
 provider abbreviation should be used (CAPD, KCP etc.).
-
-**manager_name** (String): If provided, it will allow tilt to move the provider controller under the above label.
 
 ## Customizing Tilt
 
@@ -282,13 +343,13 @@ is immediately before the "real work" happens.
 
 At a high level, the Tiltfile performs the following actions:
 
-1. Read `tilt-settings.json`
+1. Read `tilt-settings.yaml`
 1. Configure the allowed Kubernetes contexts
 1. Set the default registry
 1. Define the `providers` map
 1. Include user-defined Tilt files
 1. Deploy cert-manager
-1. Enable providers (`core` + what is listed in `tilt-settings.json`)
+1. Enable providers (`core` + what is listed in `tilt-settings.yaml`)
     1. Build the manager binary locally as a `local_resource`
     1. Invoke `docker_build` for the provider
     1. Invoke `kustomize` for the provider's `config/` directory

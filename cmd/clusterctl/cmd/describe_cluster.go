@@ -28,10 +28,11 @@ import (
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/duration"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
+
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/client"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/client/tree"
-	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -51,13 +52,17 @@ var (
 )
 
 type describeClusterOptions struct {
-	kubeconfig        string
-	kubeconfigContext string
-
-	namespace           string
-	showOtherConditions string
-	disableNoEcho       bool
-	disableGrouping     bool
+	kubeconfig              string
+	kubeconfigContext       string
+	namespace               string
+	showOtherConditions     string
+	showMachineSets         bool
+	showClusterResourceSets bool
+	showTemplates           bool
+	echo                    bool
+	disableNoEcho           bool
+	grouping                bool
+	disableGrouping         bool
 }
 
 var dc = &describeClusterOptions{}
@@ -82,11 +87,11 @@ var describeClusterClusterCmd = &cobra.Command{
 
 		# Describe the cluster named test-1 disabling automatic grouping of objects with the same ready condition
 		# e.g. un-group all the machines with Ready=true instead of showing a single group node.
-		clusterctl describe cluster test-1 --disable-grouping
+		clusterctl describe cluster test-1 --grouping=false
 
 		# Describe the cluster named test-1 disabling automatic echo suppression
         # e.g. show the infrastructure machine objects, no matter if the current state is already reported by the machine's Ready condition.
-		clusterctl describe cluster test-1`),
+		clusterctl describe cluster test-1 --disable-no-echo`),
 
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -103,11 +108,26 @@ func init() {
 		"The namespace where the workload cluster is located. If unspecified, the current namespace will be used.")
 
 	describeClusterClusterCmd.Flags().StringVar(&dc.showOtherConditions, "show-conditions", "",
-		" list of comma separated kind or kind/name for which the command should show all the object's conditions (use 'all' to show conditions for everything).")
+		"list of comma separated kind or kind/name for which the command should show all the object's conditions (use 'all' to show conditions for everything).")
+	describeClusterClusterCmd.Flags().BoolVar(&dc.showMachineSets, "show-machinesets", false,
+		"Show MachineSet objects.")
+	describeClusterClusterCmd.Flags().BoolVar(&dc.showClusterResourceSets, "show-resourcesets", false,
+		"Show cluster resource sets.")
+	describeClusterClusterCmd.Flags().BoolVar(&dc.showTemplates, "show-templates", false,
+		"Show infrastructure and bootstrap config templates associated with the cluster.")
+
+	describeClusterClusterCmd.Flags().BoolVar(&dc.echo, "echo", false, ""+
+		"Show MachineInfrastructure and BootstrapConfig when ready condition is true or it has the Status, Severity and Reason of the machine's object.")
 	describeClusterClusterCmd.Flags().BoolVar(&dc.disableNoEcho, "disable-no-echo", false, ""+
 		"Disable hiding of a MachineInfrastructure and BootstrapConfig when ready condition is true or it has the Status, Severity and Reason of the machine's object.")
+	_ = describeClusterClusterCmd.Flags().MarkDeprecated("disable-no-echo",
+		"use --echo instead.")
+	describeClusterClusterCmd.Flags().BoolVar(&dc.grouping, "grouping", true,
+		"Groups machines when ready condition has the same Status, Severity and Reason.")
 	describeClusterClusterCmd.Flags().BoolVar(&dc.disableGrouping, "disable-grouping", false,
 		"Disable grouping machines when ready condition has the same Status, Severity and Reason.")
+	_ = describeClusterClusterCmd.Flags().MarkDeprecated("disable-grouping",
+		"use --grouping instead.")
 
 	// completions
 	describeClusterClusterCmd.ValidArgsFunction = resourceNameCompletionFunc(
@@ -128,12 +148,16 @@ func runDescribeCluster(name string) error {
 	}
 
 	tree, err := c.DescribeCluster(client.DescribeClusterOptions{
-		Kubeconfig:          client.Kubeconfig{Path: dc.kubeconfig, Context: dc.kubeconfigContext},
-		Namespace:           dc.namespace,
-		ClusterName:         name,
-		ShowOtherConditions: dc.showOtherConditions,
-		DisableNoEcho:       dc.disableNoEcho,
-		DisableGrouping:     dc.disableGrouping,
+		Kubeconfig:              client.Kubeconfig{Path: dc.kubeconfig, Context: dc.kubeconfigContext},
+		Namespace:               dc.namespace,
+		ClusterName:             name,
+		ShowOtherConditions:     dc.showOtherConditions,
+		ShowClusterResourceSets: dc.showClusterResourceSets,
+		ShowTemplates:           dc.showTemplates,
+		ShowMachineSets:         dc.showMachineSets,
+		AddTemplateVirtualNode:  true,
+		Echo:                    dc.echo || dc.disableNoEcho,
+		Grouping:                dc.grouping && !dc.disableGrouping,
 	})
 	if err != nil {
 		return err
@@ -197,11 +221,19 @@ func addObjectRow(prefix string, tbl *uitable.Table, objectTree *tree.ObjectTree
 	}
 
 	// Add a row for each object's children, taking care of updating the tree view prefix.
-	// NOTE: Children objects are sorted by row name for better readability.
 	childrenObj := objectTree.GetObjectsByParent(obj.GetUID())
-	sort.Slice(childrenObj, func(i, j int) bool {
-		return getRowName(childrenObj[i]) < getRowName(childrenObj[j])
-	})
+
+	// printBefore returns true if children[i] should be printed before children[j]. Objects are sorted by z-order and
+	// row name such that objects with higher z-order are printed first, and objects with the same z-order are
+	// printed in alphabetical order.
+	printBefore := func(i, j int) bool {
+		if tree.GetZOrder(childrenObj[i]) == tree.GetZOrder(childrenObj[j]) {
+			return getRowName(childrenObj[i]) < getRowName(childrenObj[j])
+		}
+
+		return tree.GetZOrder(childrenObj[i]) > tree.GetZOrder(childrenObj[j])
+	}
+	sort.Slice(childrenObj, printBefore)
 
 	for i, child := range childrenObj {
 		addObjectRow(getChildPrefix(prefix, i, len(childrenObj)), tbl, objectTree, child)
@@ -255,7 +287,7 @@ func getChildPrefix(currentPrefix string, childIndex, childCount int) string {
 
 // getRowName returns the object name in the tree view according to following rules:
 // - group objects are represented as #of objects kind, e.g. 3 Machines...
-// - other virtual objects are represented using the object name, e.g. Workers
+// - other virtual objects are represented using the object name, e.g. Workers, or meta name if provided.
 // - objects with a meta name are represented as meta name - (kind/name), e.g. ClusterInfrastructure - DockerCluster/test1
 // - other objects are represented as kind/name, e.g.Machine/test1-md-0-779b87ff56-642vs
 // - if the object is being deleted, a prefix will be added.
@@ -267,6 +299,9 @@ func getRowName(obj ctrlclient.Object) string {
 	}
 
 	if tree.IsVirtualObject(obj) {
+		if metaName := tree.GetMetaName(obj); metaName != "" {
+			return metaName
+		}
 		return obj.GetName()
 	}
 

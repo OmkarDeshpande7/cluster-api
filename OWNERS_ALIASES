@@ -20,14 +20,15 @@ aliases:
   # non-admin folks who have write-access and can approve any PRs in the repo
   cluster-api-maintainers:
   - CecileRobertMichon
+  - enxebre
   - fabriziopandini
+  - sbueringer
   - vincepri
 
   # folks who can review and LGTM any PRs in the repo
   cluster-api-reviewers:
   - JoelSpeed
   - sbueringer
-  - enxebre
   - stmcginnis
 
   # -----------------------------------------------------------
@@ -45,6 +46,17 @@ aliases:
 
   cluster-api-bootstrap-provider-kubeadm-maintainers:
   cluster-api-bootstrap-provider-kubeadm-reviewers:
+    - killianmuldoon
+
+  # -----------------------------------------------------------
+  # OWNER_ALIASES for bootstrap/kubeadm/internal/ignition
+  # -----------------------------------------------------------
+
+  cluster-api-bootstrap-provider-kubeadm-ignition-maintainers:
+  cluster-api-bootstrap-provider-kubeadm-ignition-reviewers:
+  - dongsupark
+  - invidian
+  - johananl
 
   # -----------------------------------------------------------
   # OWNER_ALIASES for controlplane/kubeadm
@@ -59,6 +71,21 @@ aliases:
 
   cluster-api-clusterctl-maintainers:
   cluster-api-clusterctl-reviewers:
+  - ykakarap
+
+  # -----------------------------------------------------------
+  # OWNER_ALIASES for test
+  # -----------------------------------------------------------
+
+  cluster-api-test-reviewers:
+  cluster-api-test-maintainers:
+
+  # -----------------------------------------------------------
+  # OWNER_ALIASES for test/framework
+  # -----------------------------------------------------------
+
+  cluster-api-test-framework-reviewers:
+  cluster-api-test-framework-maintainers:
 
   # -----------------------------------------------------------
   # OWNER_ALIASES for test/infrastructure/docker
@@ -66,3 +93,11 @@ aliases:
 
   cluster-api-provider-docker-reviewers:
   cluster-api-provider-docker-maintainers:
+
+  # -----------------------------------------------------------
+  # OWNER_ALIASES for docs
+  # -----------------------------------------------------------
+
+  cluster-api-docs-reviewers:
+    - killianmuldoon
+  cluster-api-docs-maintainers:

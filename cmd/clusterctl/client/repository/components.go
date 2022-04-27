@@ -28,6 +28,7 @@ import (
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	clusterctlv1 "sigs.k8s.io/cluster-api/cmd/clusterctl/api/v1alpha3"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/client/config"
@@ -42,14 +43,10 @@ const (
 	clusterRoleKind                    = "ClusterRole"
 	clusterRoleBindingKind             = "ClusterRoleBinding"
 	roleBindingKind                    = "RoleBinding"
+	certificateKind                    = "Certificate"
 	mutatingWebhookConfigurationKind   = "MutatingWebhookConfiguration"
 	validatingWebhookConfigurationKind = "ValidatingWebhookConfiguration"
 	customResourceDefinitionKind       = "CustomResourceDefinition"
-)
-
-const (
-	// WebhookNamespaceName is the namespace used to deploy Cluster API webhooks.
-	WebhookNamespaceName = "capi-webhook-system"
 )
 
 // Components wraps a YAML file that defines the provider components
@@ -61,7 +58,7 @@ const (
 // 3. Ensure all the ClusterRoleBinding which are referencing namespaced objects have the name prefixed with the namespace name
 // 4. Adds labels to all the components in order to allow easy identification of the provider objects.
 type Components interface {
-	// configuration of the provider the provider components belongs to.
+	// Provider holds configuration of the provider the provider components belong to.
 	config.Provider
 
 	// Version of the provider.
@@ -146,6 +143,25 @@ func (c *components) Objs() []unstructured.Unstructured {
 
 func (c *components) Yaml() ([]byte, error) {
 	return utilyaml.FromUnstructured(c.objs)
+}
+
+// ComponentsAlterFn defines the function that is used to alter the components.Objs().
+type ComponentsAlterFn func(objs []unstructured.Unstructured) ([]unstructured.Unstructured, error)
+
+// AlterComponents provides a mechanism to alter the component.Objs from outside
+// the repository module.
+func AlterComponents(comps Components, alterFn ComponentsAlterFn) error {
+	c, ok := comps.(*components)
+	if !ok {
+		return errors.New("could not alter components as Components is not of the correct type")
+	}
+
+	alteredObjs, err := alterFn(c.Objs())
+	if err != nil {
+		return err
+	}
+	c.objs = alteredObjs
+	return nil
 }
 
 // ComponentsOptions represents specific inputs that are passed in to
@@ -313,6 +329,8 @@ func fixTargetNamespace(objs []unstructured.Unstructured, targetNamespace string
 			o.SetName(targetNamespace)
 		}
 
+		originalNamespace := o.GetNamespace()
+
 		// if the object is namespaced, set the namespace name
 		if util.IsResourceNamespaced(o.GetKind()) {
 			o.SetNamespace(targetNamespace)
@@ -321,6 +339,14 @@ func fixTargetNamespace(objs []unstructured.Unstructured, targetNamespace string
 		if o.GetKind() == mutatingWebhookConfigurationKind || o.GetKind() == validatingWebhookConfigurationKind || o.GetKind() == customResourceDefinitionKind {
 			var err error
 			o, err = fixWebhookNamespaceReferences(o, targetNamespace)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		if o.GetKind() == certificateKind {
+			var err error
+			o, err = fixCertificate(o, originalNamespace, targetNamespace)
 			if err != nil {
 				return nil, err
 			}
@@ -413,6 +439,7 @@ func fixValidatingWebhookNamespaceReferences(o unstructured.Unstructured, target
 	}
 	return o, errors.Errorf("failed to patch %s ValidatingWebhookConfiguration", version)
 }
+
 func fixCRDWebhookNamespaceReference(o unstructured.Unstructured, targetNamespace string) (unstructured.Unstructured, error) {
 	version := o.GroupVersionKind().Version
 	switch version {
@@ -437,6 +464,33 @@ func fixCRDWebhookNamespaceReference(o unstructured.Unstructured, targetNamespac
 		return o, scheme.Scheme.Convert(crd, &o, nil)
 	}
 	return o, errors.Errorf("failed to patch %s CustomResourceDefinition", version)
+}
+
+// fixCertificate fixes the dnsNames of cert-manager Certificates. The DNS names contain the dns names of the provider
+// services (including the namespace) and thus have to be modified to use the target namespace instead.
+func fixCertificate(o unstructured.Unstructured, originalNamespace, targetNamespace string) (unstructured.Unstructured, error) {
+	dnsNames, ok, err := unstructured.NestedStringSlice(o.UnstructuredContent(), "spec", "dnsNames")
+	if err != nil {
+		return o, errors.Wrapf(err, "failed to get .spec.dnsNames from Certificate %s/%s", o.GetNamespace(), o.GetName())
+	}
+	// Return if we don't find .spec.dnsNames.
+	if !ok {
+		return o, nil
+	}
+
+	// Iterate through dnsNames and adjust the namespace.
+	// The dnsNames slice usually looks like this:
+	// - $(SERVICE_NAME).$(SERVICE_NAMESPACE).svc
+	// - $(SERVICE_NAME).$(SERVICE_NAMESPACE).svc.cluster.local
+	for i, dnsName := range dnsNames {
+		dnsNames[i] = strings.Replace(dnsName, fmt.Sprintf(".%s.", originalNamespace), fmt.Sprintf(".%s.", targetNamespace), 1)
+	}
+
+	if err := unstructured.SetNestedStringSlice(o.UnstructuredContent(), dnsNames, "spec", "dnsNames"); err != nil {
+		return o, errors.Wrapf(err, "failed to set .spec.dnsNames to Certificate %s/%s", o.GetNamespace(), o.GetName())
+	}
+
+	return o, nil
 }
 
 // fixRBAC ensures all the ClusterRole and ClusterRoleBinding have the name prefixed with the namespace name and that

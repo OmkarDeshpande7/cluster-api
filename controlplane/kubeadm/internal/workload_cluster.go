@@ -36,7 +36,11 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
+
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1beta1"
 	kubeadmtypes "sigs.k8s.io/cluster-api/bootstrap/kubeadm/types"
@@ -45,18 +49,17 @@ import (
 	"sigs.k8s.io/cluster-api/util/certs"
 	containerutil "sigs.k8s.io/cluster-api/util/container"
 	"sigs.k8s.io/cluster-api/util/patch"
-	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/yaml"
 )
 
 const (
-	kubeProxyKey              = "kube-proxy"
-	kubeadmConfigKey          = "kubeadm-config"
-	kubeletConfigKey          = "kubelet"
-	cgroupDriverKey           = "cgroupDriver"
-	labelNodeRoleControlPlane = "node-role.kubernetes.io/master"
-	clusterStatusKey          = "ClusterStatus"
-	clusterConfigurationKey   = "ClusterConfiguration"
+	kubeProxyKey                 = "kube-proxy"
+	kubeadmConfigKey             = "kubeadm-config"
+	kubeletConfigKey             = "kubelet"
+	cgroupDriverKey              = "cgroupDriver"
+	labelNodeRoleOldControlPlane = "node-role.kubernetes.io/master" // Deprecated: https://github.com/kubernetes/kubeadm/issues/2200
+	labelNodeRoleControlPlane    = "node-role.kubernetes.io/control-plane"
+	clusterStatusKey             = "ClusterStatus"
+	clusterConfigurationKey      = "ClusterConfiguration"
 )
 
 var (
@@ -71,6 +74,12 @@ var (
 	//
 	// NOTE: The following assumes that kubeadm version equals to Kubernetes version.
 	minVerKubeletSystemdDriver = semver.MustParse("1.21.0")
+
+	// Starting from v1.24.0 kubeadm uses "kubelet-config" a ConfigMap name for KubeletConfiguration,
+	// Dropping the X-Y suffix.
+	//
+	// NOTE: The following assumes that kubeadm version equals to Kubernetes version.
+	minVerUnversionedKubeletConfig = semver.MustParse("1.24.0")
 
 	// ErrControlPlaneMinNodes signals that a cluster doesn't meet the minimum required nodes
 	// to remove an etcd member.
@@ -120,14 +129,31 @@ type Workload struct {
 var _ WorkloadCluster = &Workload{}
 
 func (w *Workload) getControlPlaneNodes(ctx context.Context) (*corev1.NodeList, error) {
-	nodes := &corev1.NodeList{}
-	labels := map[string]string{
-		labelNodeRoleControlPlane: "",
+	controlPlaneNodes := &corev1.NodeList{}
+	controlPlaneNodeNames := sets.NewString()
+
+	for _, label := range []string{labelNodeRoleOldControlPlane, labelNodeRoleControlPlane} {
+		nodes := &corev1.NodeList{}
+		if err := w.Client.List(ctx, nodes, ctrlclient.MatchingLabels(map[string]string{
+			label: "",
+		})); err != nil {
+			return nil, err
+		}
+
+		for i := range nodes.Items {
+			node := nodes.Items[i]
+
+			// Continue if we already added that node.
+			if controlPlaneNodeNames.Has(node.Name) {
+				continue
+			}
+
+			controlPlaneNodeNames.Insert(node.Name)
+			controlPlaneNodes.Items = append(controlPlaneNodes.Items, node)
+		}
 	}
-	if err := w.Client.List(ctx, nodes, ctrlclient.MatchingLabels(labels)); err != nil {
-		return nil, err
-	}
-	return nodes, nil
+
+	return controlPlaneNodes, nil
 }
 
 func (w *Workload) getConfigMap(ctx context.Context, configMap ctrlclient.ObjectKey) (*corev1.ConfigMap, error) {
@@ -159,7 +185,7 @@ func (w *Workload) UpdateKubernetesVersionInKubeadmConfigMap(ctx context.Context
 // This is a necessary process for upgrades.
 func (w *Workload) UpdateKubeletConfigMap(ctx context.Context, version semver.Version) error {
 	// Check if the desired configmap already exists
-	desiredKubeletConfigMapName := fmt.Sprintf("kubelet-config-%d.%d", version.Major, version.Minor)
+	desiredKubeletConfigMapName := generateKubeletConfigName(version)
 	configMapKey := ctrlclient.ObjectKey{Name: desiredKubeletConfigMapName, Namespace: metav1.NamespaceSystem}
 	_, err := w.getConfigMap(ctx, configMapKey)
 	if err == nil {
@@ -170,7 +196,14 @@ func (w *Workload) UpdateKubeletConfigMap(ctx context.Context, version semver.Ve
 		return errors.Wrapf(err, "error determining if kubelet configmap %s exists", desiredKubeletConfigMapName)
 	}
 
-	previousMinorVersionKubeletConfigMapName := fmt.Sprintf("kubelet-config-%d.%d", version.Major, version.Minor-1)
+	previousMinorVersionKubeletConfigMapName := generateKubeletConfigName(semver.Version{Major: version.Major, Minor: version.Minor - 1})
+
+	// If desired and previous ConfigMap name are the same it means we already completed the transition
+	// to the unified KubeletConfigMap name in the previous upgrade; no additional operations are required.
+	if desiredKubeletConfigMapName == previousMinorVersionKubeletConfigMapName {
+		return nil
+	}
+
 	configMapKey = ctrlclient.ObjectKey{Name: previousMinorVersionKubeletConfigMapName, Namespace: metav1.NamespaceSystem}
 	// Returns a copy
 	cm, err := w.getConfigMap(ctx, configMapKey)

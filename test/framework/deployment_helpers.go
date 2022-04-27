@@ -19,6 +19,7 @@ package framework
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -29,18 +30,23 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/api/policy/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	utilversion "k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/client-go/kubernetes"
-
-	"k8s.io/api/policy/v1beta1"
 	"k8s.io/utils/pointer"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
 	"sigs.k8s.io/cluster-api/test/framework/internal/log"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+const (
+	nodeRoleOldControlPlane = "node-role.kubernetes.io/master" // Deprecated: https://github.com/kubernetes/kubeadm/issues/2200
+	nodeRoleControlPlane    = "node-role.kubernetes.io/control-plane"
 )
 
 // WaitForDeploymentsAvailableInput is the input for WaitForDeploymentsAvailable.
@@ -93,6 +99,18 @@ type WatchDeploymentLogsInput struct {
 	LogPath    string
 }
 
+// logMetadata contains metadata about the logs.
+// The format is very similar to the one used by promtail.
+type logMetadata struct {
+	Job       string `json:"job"`
+	Namespace string `json:"namespace"`
+	App       string `json:"app"`
+	Pod       string `json:"pod"`
+	Container string `json:"container"`
+	NodeName  string `json:"node_name"`
+	Stream    string `json:"stream"`
+}
+
 // WatchDeploymentLogs streams logs for all containers for all pods belonging to a deployment. Each container's logs are streamed
 // in a separate goroutine so they can all be streamed concurrently. This only causes a test failure if there are errors
 // retrieving the deployment, its pods, or setting up a log file. If there is an error with the log streaming itself,
@@ -115,6 +133,23 @@ func WatchDeploymentLogs(ctx context.Context, input WatchDeploymentLogsInput) {
 	for _, pod := range pods.Items {
 		for _, container := range deployment.Spec.Template.Spec.Containers {
 			log.Logf("Creating log watcher for controller %s/%s, pod %s, container %s", input.Deployment.Namespace, input.Deployment.Name, pod.Name, container.Name)
+
+			// Create log metadata file.
+			logMetadataFile := filepath.Clean(path.Join(input.LogPath, input.Deployment.Name, pod.Name, container.Name+"-log-metadata.json"))
+			Expect(os.MkdirAll(filepath.Dir(logMetadataFile), 0750)).To(Succeed())
+
+			metadata := logMetadata{
+				Job:       input.Deployment.Namespace + "/" + input.Deployment.Name,
+				Namespace: input.Deployment.Namespace,
+				App:       input.Deployment.Name,
+				Pod:       pod.Name,
+				Container: container.Name,
+				NodeName:  pod.Spec.NodeName,
+				Stream:    "stderr",
+			}
+			metadataBytes, err := json.Marshal(&metadata)
+			Expect(err).To(BeNil())
+			Expect(os.WriteFile(logMetadataFile, metadataBytes, 0600)).To(Succeed())
 
 			// Watch each container's logs in a goroutine so we can stream them all concurrently.
 			go func(pod corev1.Pod, container corev1.Container) {
@@ -225,7 +260,8 @@ type WaitForDNSUpgradeInput struct {
 	DNSVersion string
 }
 
-// WaitForDNSUpgrade waits until CoreDNS version matches with the CoreDNS upgrade version. This is called during KCP upgrade.
+// WaitForDNSUpgrade waits until CoreDNS version matches with the CoreDNS upgrade version and all its replicas
+// are ready for use with the upgraded version. This is called during KCP upgrade.
 func WaitForDNSUpgrade(ctx context.Context, input WaitForDNSUpgradeInput, intervals ...interface{}) {
 	By("Ensuring CoreDNS has the correct image")
 
@@ -237,10 +273,18 @@ func WaitForDNSUpgrade(ctx context.Context, input WaitForDNSUpgradeInput, interv
 		}
 
 		// NOTE: coredns image name has changed over time (k8s.gcr.io/coredns,
-		// k8s.gcr.io/coredns/coredns), so we are checking only if the version actually changed.
+		// k8s.gcr.io/coredns/coredns), so we are checking if the version actually changed.
 		if strings.HasSuffix(d.Spec.Template.Spec.Containers[0].Image, fmt.Sprintf(":%s", input.DNSVersion)) {
 			return true, nil
 		}
+
+		// check whether the upgraded CoreDNS replicas are available and ready for use.
+		if d.Status.ObservedGeneration >= d.Generation {
+			if d.Spec.Replicas != nil && d.Status.UpdatedReplicas == *d.Spec.Replicas && d.Status.AvailableReplicas == *d.Spec.Replicas {
+				return true, nil
+			}
+		}
+
 		return false, nil
 	}, intervals...).Should(BeTrue())
 }
@@ -307,10 +351,23 @@ func DeployUnevictablePod(ctx context.Context, input DeployUnevictablePodInput) 
 		},
 	}
 	if input.ControlPlane != nil {
-		workloadDeployment.Spec.Template.Spec.NodeSelector = map[string]string{"node-role.kubernetes.io/master": ""}
+		serverVersion, err := workloadClient.ServerVersion()
+		Expect(err).ToNot(HaveOccurred())
+
+		// Use the control-plane label for Kubernetes version >= v1.20.0.
+		if utilversion.MustParseGeneric(serverVersion.String()).AtLeast(utilversion.MustParseGeneric("v1.20.0")) {
+			workloadDeployment.Spec.Template.Spec.NodeSelector = map[string]string{nodeRoleControlPlane: ""}
+		} else {
+			workloadDeployment.Spec.Template.Spec.NodeSelector = map[string]string{nodeRoleOldControlPlane: ""}
+		}
+
 		workloadDeployment.Spec.Template.Spec.Tolerations = []corev1.Toleration{
 			{
-				Key:    "node-role.kubernetes.io/master",
+				Key:    nodeRoleOldControlPlane,
+				Effect: "NoSchedule",
+			},
+			{
+				Key:    nodeRoleControlPlane,
 				Effect: "NoSchedule",
 			},
 		}

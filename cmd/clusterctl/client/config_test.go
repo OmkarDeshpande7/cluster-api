@@ -56,21 +56,24 @@ func Test_clusterctlClient_GetProvidersConfig(t *testing.T) {
 			// note: these will be sorted by name by the Providers() call, so be sure they are in alphabetical order here too
 			wantProviders: []string{
 				config.ClusterAPIProviderName,
-				config.AWSEKSBootstrapProviderName,
 				config.KubeadmBootstrapProviderName,
 				config.TalosBootstrapProviderName,
-				config.AWSEKSControlPlaneProviderName,
 				config.KubeadmControlPlaneProviderName,
 				config.NestedControlPlaneProviderName,
 				config.TalosControlPlaneProviderName,
 				config.AWSProviderName,
 				config.AzureProviderName,
+				config.BYOHProviderName,
 				config.DOProviderName,
 				config.DockerProviderName,
 				config.GCPProviderName,
+				config.HetznerProviderName,
+				config.IBMCloudProviderName,
 				config.MAASProviderName,
 				config.Metal3ProviderName,
 				config.NestedProviderName,
+				config.NutanixProviderName,
+				config.OCIProviderName,
 				config.OpenStackProviderName,
 				config.PacketProviderName,
 				config.SideroProviderName,
@@ -86,22 +89,25 @@ func Test_clusterctlClient_GetProvidersConfig(t *testing.T) {
 			// note: these will be sorted by name by the Providers() call, so be sure they are in alphabetical order here too
 			wantProviders: []string{
 				config.ClusterAPIProviderName,
-				config.AWSEKSBootstrapProviderName,
 				customProviderConfig.Name(),
 				config.KubeadmBootstrapProviderName,
 				config.TalosBootstrapProviderName,
-				config.AWSEKSControlPlaneProviderName,
 				config.KubeadmControlPlaneProviderName,
 				config.NestedControlPlaneProviderName,
 				config.TalosControlPlaneProviderName,
 				config.AWSProviderName,
 				config.AzureProviderName,
+				config.BYOHProviderName,
 				config.DOProviderName,
 				config.DockerProviderName,
 				config.GCPProviderName,
+				config.HetznerProviderName,
+				config.IBMCloudProviderName,
 				config.MAASProviderName,
 				config.Metal3ProviderName,
 				config.NestedProviderName,
+				config.NutanixProviderName,
+				config.OCIProviderName,
 				config.OpenStackProviderName,
 				config.PacketProviderName,
 				config.SideroProviderName,
@@ -616,6 +622,41 @@ func Test_clusterctlClient_GetClusterTemplate(t *testing.T) {
 	}
 }
 
+func Test_clusterctlClient_GetClusterTemplate_withClusterClass(t *testing.T) {
+	g := NewWithT(t)
+
+	rawTemplate := mangedTopologyTemplateYAML("ns4", "${CLUSTER_NAME}", "dev")
+	rawClusterClassTemplate := clusterClassYAML("ns4", "dev")
+	config1 := newFakeConfig().WithProvider(infraProviderConfig)
+
+	repository1 := newFakeRepository(infraProviderConfig, config1).
+		WithPaths("root", "components").
+		WithDefaultVersion("v3.0.0").
+		WithFile("v3.0.0", "cluster-template-dev.yaml", rawTemplate).
+		WithFile("v3.0.0", "clusterclass-dev.yaml", rawClusterClassTemplate)
+
+	cluster1 := newFakeCluster(cluster.Kubeconfig{Path: "kubeconfig", Context: "mgmt-context"}, config1).
+		WithProviderInventory(infraProviderConfig.Name(), infraProviderConfig.Type(), "v3.0.0", "ns4").
+		WithObjs(test.FakeCAPISetupObjects()...)
+
+	client := newFakeClient(config1).
+		WithCluster(cluster1).
+		WithRepository(repository1)
+
+	// Assert output
+	got, err := client.GetClusterTemplate(GetClusterTemplateOptions{
+		Kubeconfig:      Kubeconfig{Path: "kubeconfig", Context: "mgmt-context"},
+		ClusterName:     "test",
+		TargetNamespace: "ns1",
+		ProviderRepositorySource: &ProviderRepositorySourceOptions{
+			Flavor: "dev",
+		},
+	})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(got.Variables()).To(Equal([]string{"CLUSTER_NAME"}))
+	g.Expect(got.TargetNamespace()).To(Equal("ns1"))
+	g.Expect(got.Objs()).To(ContainElement(MatchClusterClass("dev", "ns1")))
+}
 func Test_clusterctlClient_GetClusterTemplate_onEmptyCluster(t *testing.T) {
 	g := NewWithT(t)
 
@@ -784,7 +825,7 @@ func newFakeClientWithoutCluster(configClient config.Client) *fakeClient {
 		InjectConfig(fake.configClient),
 		InjectRepositoryFactory(func(input RepositoryClientFactoryInput) (repository.Client, error) {
 			if _, ok := fake.repositories[input.Provider.ManifestLabel()]; !ok {
-				return nil, errors.Errorf("Repository for kubeconfig %q does not exist.", input.Provider.ManifestLabel())
+				return nil, errors.Errorf("repository for kubeconfig %q does not exist", input.Provider.ManifestLabel())
 			}
 			return fake.repositories[input.Provider.ManifestLabel()], nil
 		}),

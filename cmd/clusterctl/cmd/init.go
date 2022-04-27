@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/client"
 )
 
@@ -101,7 +102,7 @@ func init() {
 		"Bootstrap providers and versions (e.g. kubeadm:v0.3.0) to add to the management cluster. If unspecified, Kubeadm bootstrap provider's latest release is used.")
 	initCmd.Flags().StringSliceVarP(&initOpts.controlPlaneProviders, "control-plane", "c", nil,
 		"Control plane providers and versions (e.g. kubeadm:v0.3.0) to add to the management cluster. If unspecified, the Kubeadm control plane provider's latest release is used.")
-	initCmd.Flags().StringVar(&initOpts.targetNamespace, "target-namespace", "",
+	initCmd.Flags().StringVarP(&initOpts.targetNamespace, "target-namespace", "n", "",
 		"The target namespace where the providers should be deployed. If unspecified, the provider components' default namespace is used.")
 	initCmd.Flags().BoolVar(&initOpts.waitProviders, "wait-providers", false,
 		"Wait for providers to be installed.")

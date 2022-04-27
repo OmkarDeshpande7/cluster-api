@@ -20,11 +20,11 @@ import (
 	"testing"
 
 	. "github.com/onsi/gomega"
-	utildefaulting "sigs.k8s.io/cluster-api/util/defaulting"
-
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/pointer"
+
+	utildefaulting "sigs.k8s.io/cluster-api/util/defaulting"
 )
 
 func TestMachineDefault(t *testing.T) {
@@ -46,6 +46,7 @@ func TestMachineDefault(t *testing.T) {
 	g.Expect(m.Spec.Bootstrap.ConfigRef.Namespace).To(Equal(m.Namespace))
 	g.Expect(m.Spec.InfrastructureRef.Namespace).To(Equal(m.Namespace))
 	g.Expect(*m.Spec.Version).To(Equal("v1.17.5"))
+	g.Expect(m.Spec.NodeDeletionTimeout.Duration).To(Equal(defaultNodeDeletionTimeout))
 }
 
 func TestMachineBootstrapValidation(t *testing.T) {

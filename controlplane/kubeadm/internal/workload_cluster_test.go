@@ -19,7 +19,6 @@ package internal
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/blang/semver"
@@ -29,13 +28,86 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1beta1"
-	"sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
-	"sigs.k8s.io/cluster-api/util/yaml"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1beta1"
+	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
+	"sigs.k8s.io/cluster-api/util/yaml"
 )
+
+func TestGetControlPlaneNodes(t *testing.T) {
+	tests := []struct {
+		name          string
+		nodes         []corev1.Node
+		expectedNodes []string
+	}{
+		{
+			name: "Return control plane nodes",
+			nodes: []corev1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "control-plane-node-with-old-label",
+						Labels: map[string]string{
+							labelNodeRoleOldControlPlane: "",
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "control-plane-node-with-both-labels",
+						Labels: map[string]string{
+							labelNodeRoleOldControlPlane: "",
+							labelNodeRoleControlPlane:    "",
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "control-plane-node-with-new-label",
+						Labels: map[string]string{
+							labelNodeRoleControlPlane: "",
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "worker-node",
+						Labels: map[string]string{},
+					},
+				},
+			},
+			expectedNodes: []string{
+				"control-plane-node-with-both-labels",
+				"control-plane-node-with-old-label",
+				"control-plane-node-with-new-label",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			objs := []client.Object{}
+			for i := range tt.nodes {
+				objs = append(objs, &tt.nodes[i])
+			}
+			fakeClient := fake.NewClientBuilder().WithObjects(objs...).Build()
+
+			w := &Workload{
+				Client: fakeClient,
+			}
+			nodes, err := w.getControlPlaneNodes(ctx)
+			g.Expect(err).ToNot(HaveOccurred())
+			var actualNodes []string
+			for _, n := range nodes.Items {
+				actualNodes = append(actualNodes, n.Name)
+			}
+			g.Expect(actualNodes).To(Equal(tt.expectedNodes))
+		})
+	}
+}
 
 func TestUpdateKubeProxyImageInfo(t *testing.T) {
 	tests := []struct {
@@ -45,42 +117,42 @@ func TestUpdateKubeProxyImageInfo(t *testing.T) {
 		expectImage string
 		clientGet   map[string]interface{}
 		patchErr    error
-		KCP         *v1beta1.KubeadmControlPlane
+		KCP         *controlplanev1.KubeadmControlPlane
 	}{
 		{
 			name:        "succeeds if patch correctly",
 			ds:          newKubeProxyDS(),
 			expectErr:   false,
 			expectImage: "k8s.gcr.io/kube-proxy:v1.16.3",
-			KCP:         &v1beta1.KubeadmControlPlane{Spec: v1beta1.KubeadmControlPlaneSpec{Version: "v1.16.3"}},
+			KCP:         &controlplanev1.KubeadmControlPlane{Spec: controlplanev1.KubeadmControlPlaneSpec{Version: "v1.16.3"}},
 		},
 		{
 			name:        "returns error if image in kube-proxy ds was in digest format",
 			ds:          newKubeProxyDSWithImage("k8s.gcr.io/kube-proxy@sha256:47bfd"),
 			expectErr:   true,
 			expectImage: "k8s.gcr.io/kube-proxy@sha256:47bfd",
-			KCP:         &v1beta1.KubeadmControlPlane{Spec: v1beta1.KubeadmControlPlaneSpec{Version: "v1.16.3"}},
+			KCP:         &controlplanev1.KubeadmControlPlane{Spec: controlplanev1.KubeadmControlPlaneSpec{Version: "v1.16.3"}},
 		},
 		{
 			name:        "expects OCI compatible format of tag",
 			ds:          newKubeProxyDS(),
 			expectErr:   false,
 			expectImage: "k8s.gcr.io/kube-proxy:v1.16.3_build1",
-			KCP:         &v1beta1.KubeadmControlPlane{Spec: v1beta1.KubeadmControlPlaneSpec{Version: "v1.16.3+build1"}},
+			KCP:         &controlplanev1.KubeadmControlPlane{Spec: controlplanev1.KubeadmControlPlaneSpec{Version: "v1.16.3+build1"}},
 		},
 		{
 			name:      "returns error if image in kube-proxy ds was in wrong format",
 			ds:        newKubeProxyDSWithImage(""),
 			expectErr: true,
-			KCP:       &v1beta1.KubeadmControlPlane{Spec: v1beta1.KubeadmControlPlaneSpec{Version: "v1.16.3"}},
+			KCP:       &controlplanev1.KubeadmControlPlane{Spec: controlplanev1.KubeadmControlPlaneSpec{Version: "v1.16.3"}},
 		},
 		{
 			name:        "updates image repository if one has been set on the control plane",
 			ds:          newKubeProxyDS(),
 			expectErr:   false,
 			expectImage: "foo.bar.example/baz/qux/kube-proxy:v1.16.3",
-			KCP: &v1beta1.KubeadmControlPlane{
-				Spec: v1beta1.KubeadmControlPlaneSpec{
+			KCP: &controlplanev1.KubeadmControlPlane{
+				Spec: controlplanev1.KubeadmControlPlaneSpec{
 					Version: "v1.16.3",
 					KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{
 						ClusterConfiguration: &bootstrapv1.ClusterConfiguration{
@@ -94,8 +166,8 @@ func TestUpdateKubeProxyImageInfo(t *testing.T) {
 			ds:          newKubeProxyDS(),
 			expectErr:   false,
 			expectImage: "k8s.gcr.io/kube-proxy:v1.16.3",
-			KCP: &v1beta1.KubeadmControlPlane{
-				Spec: v1beta1.KubeadmControlPlaneSpec{
+			KCP: &controlplanev1.KubeadmControlPlane{
+				Spec: controlplanev1.KubeadmControlPlaneSpec{
 					Version: "v1.16.3",
 					KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{
 						ClusterConfiguration: &bootstrapv1.ClusterConfiguration{
@@ -108,8 +180,8 @@ func TestUpdateKubeProxyImageInfo(t *testing.T) {
 			name:      "returns error if image repository is invalid",
 			ds:        newKubeProxyDS(),
 			expectErr: true,
-			KCP: &v1beta1.KubeadmControlPlane{
-				Spec: v1beta1.KubeadmControlPlaneSpec{
+			KCP: &controlplanev1.KubeadmControlPlane{
+				Spec: controlplanev1.KubeadmControlPlaneSpec{
 					Version: "v1.16.3",
 					KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{
 						ClusterConfiguration: &bootstrapv1.ClusterConfiguration{
@@ -123,13 +195,13 @@ func TestUpdateKubeProxyImageInfo(t *testing.T) {
 			ds:          newKubeProxyDSWithImage(""), // Using the same image name that would otherwise lead to an error
 			expectErr:   false,
 			expectImage: "",
-			KCP: &v1beta1.KubeadmControlPlane{
+			KCP: &controlplanev1.KubeadmControlPlane{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						v1beta1.SkipKubeProxyAnnotation: "",
+						controlplanev1.SkipKubeProxyAnnotation: "",
 					},
 				},
-				Spec: v1beta1.KubeadmControlPlaneSpec{
+				Spec: controlplanev1.KubeadmControlPlaneSpec{
 					Version: "v1.16.3",
 				}},
 		},
@@ -292,9 +364,10 @@ func TestUpdateKubeletConfigMap(t *testing.T) {
 		objs               []client.Object
 		expectErr          bool
 		expectCgroupDriver string
+		expectNewConfigMap bool
 	}{
 		{
-			name:    "create new config map",
+			name:    "create new config map for 1.19 --> 1.20 (anything < 1.24); config map for previous version is copied",
 			version: semver.Version{Major: 1, Minor: 20},
 			objs: []client.Object{&corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
@@ -306,32 +379,51 @@ func TestUpdateKubeletConfigMap(t *testing.T) {
 					kubeletConfigKey: yaml.Raw(`
 						apiVersion: kubelet.config.k8s.io/v1beta1
 						kind: KubeletConfiguration
+						foo: bar
 						`),
 				},
 			}},
-			expectErr:          false,
-			expectCgroupDriver: "",
+			expectNewConfigMap: true,
 		},
 		{
-			name:    "KubeletConfig 1.21 gets the cgroupDriver set if empty",
-			version: semver.Version{Major: 1, Minor: 21},
+			name:    "create new config map 1.23 --> 1.24; config map for previous version is copied",
+			version: semver.Version{Major: 1, Minor: 24},
 			objs: []client.Object{&corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:            "kubelet-config-1.20",
+					Name:            "kubelet-config-1.23",
 					Namespace:       metav1.NamespaceSystem,
 					ResourceVersion: "some-resource-version",
 				},
 				Data: map[string]string{
 					kubeletConfigKey: yaml.Raw(`
 						apiVersion: kubelet.config.k8s.io/v1beta1
-						kind: KubeletConfiguration`),
+						kind: KubeletConfiguration
+						foo: bar
+						`),
 				},
 			}},
-			expectErr:          false,
-			expectCgroupDriver: "systemd",
+			expectNewConfigMap: true,
 		},
 		{
-			name:    "KubeletConfig 1.21 preserves cgroupDriver if already set",
+			name:    "create new config map >=1.24 --> next; no op",
+			version: semver.Version{Major: 1, Minor: 25},
+			objs: []client.Object{&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:            "kubelet-config",
+					Namespace:       metav1.NamespaceSystem,
+					ResourceVersion: "some-resource-version",
+				},
+				Data: map[string]string{
+					kubeletConfigKey: yaml.Raw(`
+						apiVersion: kubelet.config.k8s.io/v1beta1
+						kind: KubeletConfiguration
+						foo: bar
+						`),
+				},
+			}},
+		},
+		{
+			name:    "1.20 --> 1.21 sets the cgroupDriver if empty",
 			version: semver.Version{Major: 1, Minor: 21},
 			objs: []client.Object{&corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
@@ -343,18 +435,38 @@ func TestUpdateKubeletConfigMap(t *testing.T) {
 					kubeletConfigKey: yaml.Raw(`
 						apiVersion: kubelet.config.k8s.io/v1beta1
 						kind: KubeletConfiguration
-						cgroupDriver: foo`),
+						foo: bar
+						`),
 				},
 			}},
-			expectErr:          false,
-			expectCgroupDriver: "foo",
+			expectCgroupDriver: "systemd",
+			expectNewConfigMap: true,
 		},
 		{
-			name:               "returns error if cannot find previous config map",
-			version:            semver.Version{Major: 1, Minor: 21},
-			objs:               nil,
-			expectErr:          true,
-			expectCgroupDriver: "",
+			name:    "1.20 --> 1.21 preserves cgroupDriver if already set",
+			version: semver.Version{Major: 1, Minor: 21},
+			objs: []client.Object{&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:            "kubelet-config-1.20",
+					Namespace:       metav1.NamespaceSystem,
+					ResourceVersion: "some-resource-version",
+				},
+				Data: map[string]string{
+					kubeletConfigKey: yaml.Raw(`
+						apiVersion: kubelet.config.k8s.io/v1beta1
+						kind: KubeletConfiguration
+						cgroupDriver: cgroupfs
+						foo: bar
+					`),
+				},
+			}},
+			expectCgroupDriver: "cgroupfs",
+			expectNewConfigMap: true,
+		},
+		{
+			name:      "returns error if cannot find previous config map",
+			version:   semver.Version{Major: 1, Minor: 21},
+			expectErr: true,
 		},
 	}
 
@@ -371,14 +483,24 @@ func TestUpdateKubeletConfigMap(t *testing.T) {
 				return
 			}
 			g.Expect(err).ToNot(HaveOccurred())
+
+			// Check if the resulting ConfigMap exists
 			var actualConfig corev1.ConfigMap
 			g.Expect(w.Client.Get(
 				ctx,
-				client.ObjectKey{Name: fmt.Sprintf("kubelet-config-%d.%d", tt.version.Major, tt.version.Minor), Namespace: metav1.NamespaceSystem},
+				client.ObjectKey{Name: generateKubeletConfigName(tt.version), Namespace: metav1.NamespaceSystem},
 				&actualConfig,
 			)).To(Succeed())
-			g.Expect(actualConfig.ResourceVersion).ToNot(Equal("some-resource-version"))
+			// Check other values are carried over for previous config map
+			g.Expect(actualConfig.Data[kubeletConfigKey]).To(ContainSubstring("foo"))
+			// Check the cgroupvalue has the expected value
 			g.Expect(actualConfig.Data[kubeletConfigKey]).To(ContainSubstring(tt.expectCgroupDriver))
+			// check if the config map is new
+			if tt.expectNewConfigMap {
+				g.Expect(actualConfig.ResourceVersion).ToNot(Equal("some-resource-version"))
+			} else {
+				g.Expect(actualConfig.ResourceVersion).To(Equal("some-resource-version"))
+			}
 		})
 	}
 }
